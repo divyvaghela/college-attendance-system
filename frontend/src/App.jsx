@@ -1,54 +1,70 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, AlertTriangle, Calendar, BookOpen, Clock, Award, Users } from 'lucide-react';
+import { 
+  AlertTriangle, Calendar, Clock, BookOpen, Download, 
+  ChevronLeft, ChevronRight, CheckCircle2, XCircle, Users, FileText 
+} from 'lucide-react';
 
 export default function App() {
-  // Auth State
+  // ---------------- AUTH STATE ----------------
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')) || null);
   const [loginEmail, setLoginEmail] = useState('faculty@college.edu');
   const [loginPassword, setLoginPassword] = useState('123456');
   const [authError, setAuthError] = useState('');
 
-  // Active Tab
-  const [activeTab, setActiveTab] = useState('faculty'); // 'faculty' | 'history' | 'student' | 'admin' | 'defaulters'
+  // Top Nav Tab
+  const [activeTab, setActiveTab] = useState('faculty'); // 'faculty' | 'student' | 'admin'
 
-  // Faculty State
+  // ---------------- FACULTY PAGE SUB-VIEWS ----------------
+  // 'main'          : 4 Main Buttons Screen (View Attend, Attend Report, View Subject, Take Att)
+  // 'view_attend'   : Date-wise cards with Time From/To, Download, Take Attend, Pagination < 1 2 3 >
+  // 'view_subject'  : Shows 4 action buttons [Topic] [View Att] [Take Att] [View Report -> 75% filter]
+  // 'take_attend'   : Notebook Page 2 Attendance Register Screen
+  // 'session_modal' : Viewing individual session student records from View Attend cards
+  const [facultySubView, setFacultySubView] = useState('main');
+
+  // Filter Dropdowns
+  const [course, setCourse] = useState('Integrated M.Sc (CS)');
   const [semester, setSemester] = useState(7);
+  const [division, setDivision] = useState('ALL');
   const [subjects, setSubjects] = useState([]);
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [division, setDivision] = useState('ALL');
   const [slot, setSlot] = useState('10:30 AM - 11:30 AM');
-  const [facultyName, setFacultyName] = useState(user?.name || 'Prof. Sharma');
-
-  const [groups, setGroups] = useState([]);
-  const [selectedGroupId, setSelectedGroupId] = useState('');
-  const [isGroupSelectNeeded, setIsGroupSelectNeeded] = useState(false);
-
-  const [roster, setRoster] = useState([]);
-  const [attendanceMap, setAttendanceMap] = useState({});
-  const [loading, setLoading] = useState(false);
-  const [facultyMsg, setFacultyMsg] = useState('');
   const [todaySchedule, setTodaySchedule] = useState([]);
 
-  // History & Edit State
-  const [historySessions, setHistorySessions] = useState([]);
-  const [editSessionRecords, setEditSessionRecords] = useState([]);
-  const [selectedSessionId, setSelectedSessionId] = useState(null);
+  // Attendance Register (Take Attend) State
+  const [attendDate, setAttendDate] = useState(new Date().toISOString().split('T')[0]);
+  const [timeFrom, setTimeFrom] = useState('10:30');
+  const [timeTo, setTimeTo] = useState('11:30');
+  const [topicOption, setTopicOption] = useState('Default Syllabus');
+  const [customTopic, setCustomTopic] = useState('');
+  const [description, setDescription] = useState('');
+  const [roster, setRoster] = useState([]);
+  const [attendanceMap, setAttendanceMap] = useState({});
+  const [submitMsg, setSubmitMsg] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // Student State
-  const [searchRollNo, setSearchRollNo] = useState(user?.rollNo || '01');
+  // View Attend (Sessions) & Pagination State
+  const [historySessions, setHistorySessions] = useState([]);
+  const [attendPage, setAttendPage] = useState(1);
+  const [activeSessionRecords, setActiveSessionRecords] = useState(null);
+
+  // View Subject Sub-flow States
+  const [subjectActiveTab, setSubjectActiveTab] = useState('topic'); // 'topic' | 'report_75'
+  const [thresholdType, setThresholdType] = useState('less_than');
+  const [reportResult, setReportResult] = useState(null);
+
+  // Student Portal State
+  const [searchRollNo, setSearchRollNo] = useState(user?.rollNo || '56');
   const [studentData, setStudentData] = useState(null);
   const [studentLoading, setStudentLoading] = useState(false);
   const [studentError, setStudentError] = useState('');
 
-  // Defaulter State
-  const [defaulterSem, setDefaulterSem] = useState(7);
-  const [defaulters, setDefaulters] = useState([]);
-
-  // CSV State
+  // Admin CSV State
   const [csvFile, setCsvFile] = useState(null);
   const [adminMsg, setAdminMsg] = useState('');
 
-  // Handle Login
+  // ---------------- AUTH HANDLERS ----------------
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -65,7 +81,10 @@ export default function App() {
         localStorage.setItem('token', data.token);
         if (data.user.role === 'STUDENT') {
           setActiveTab('student');
-          setSearchRollNo(data.user.rollNo || '01');
+          setSearchRollNo(data.user.rollNo || '56');
+        } else {
+          setActiveTab('faculty');
+          setFacultySubView('main');
         }
       } else {
         setAuthError(data.message || 'Login failed');
@@ -80,52 +99,41 @@ export default function App() {
     localStorage.clear();
   };
 
-  // Fetch Subjects & Schedule
+  // ---------------- FETCH SUBJECTS & TIMETABLE ----------------
   useEffect(() => {
     if (user) {
       fetch(`http://localhost:5000/api/subjects?semester=${semester}`)
         .then(res => res.json())
         .then(data => {
-          setSubjects(data);
-          if (data.length > 0) {
-            setSelectedSubjectId(data[0]._id);
-          } else {
-            setSelectedSubjectId('');
-            setRoster([]);
-          }
-        });
+          setSubjects(data || []);
+          if (data && data.length > 0) setSelectedSubjectId(data[0]._id);
+          else setSelectedSubjectId('');
+        })
+        .catch(err => console.error(err));
 
       const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const today = days[new Date().getDay()];
       fetch(`http://localhost:5000/api/timetable/today?day=${today}&semester=${semester}`)
         .then(res => res.json())
-        .then(data => setTodaySchedule(data));
+        .then(data => setTodaySchedule(data || []))
+        .catch(err => console.error(err));
     }
   }, [semester, user]);
 
-  // Fetch Roster
-  const fetchRoster = async () => {
+  // ---------------- LOAD ROSTER (TAKE ATTEND) ----------------
+  const loadRosterForAttendance = async () => {
     if (!selectedSubjectId) return;
     setLoading(true);
-    setFacultyMsg('');
+    setSubmitMsg('');
     try {
-      let url = `http://localhost:5000/api/attendance/roster?subjectId=${selectedSubjectId}&division=${division}`;
-      if (selectedGroupId) url += `&groupId=${selectedGroupId}`;
-
-      const res = await fetch(url);
+      const res = await fetch(`http://localhost:5000/api/attendance/roster?subjectId=${selectedSubjectId}&division=${division}`);
       const data = await res.json();
-
-      if (data.isGroupSelectNeeded) {
-        setIsGroupSelectNeeded(true);
-        setGroups(data.groups || []);
-        setRoster([]);
-      } else {
-        setIsGroupSelectNeeded(false);
-        setRoster(data.students || []);
-        const map = {};
-        (data.students || []).forEach(st => { map[st._id] = 'PRESENT'; });
-        setAttendanceMap(map);
-      }
+      const students = data.students || [];
+      setRoster(students);
+      const map = {};
+      students.forEach(st => { map[st._id] = 'PRESENT'; });
+      setAttendanceMap(map);
+      setFacultySubView('take_attend');
     } catch (err) {
       console.error(err);
     } finally {
@@ -146,72 +154,106 @@ export default function App() {
     setAttendanceMap(updated);
   };
 
+  // Live Today Attend %
+  const totalStudents = roster.length;
+  const presentCount = Object.values(attendanceMap).filter(v => v === 'PRESENT').length;
+  const todayPercentage = totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0;
+
+  // Submit Final Attendance Session
   const handleSubmitAttendance = async () => {
+    setIsSubmitting(true);
+    setSubmitMsg('');
+    const selectedSub = subjects.find(s => s._id === selectedSubjectId);
+    const finalTopic = topicOption === 'Other' ? customTopic : `${selectedSub?.name || 'Lecture'} - Module`;
+
     const payload = {
       subjectId: selectedSubjectId,
-      facultyName: user.name,
-      slot,
+      facultyName: user?.name || 'Prof. Faculty',
+      slot: `${timeFrom} - ${timeTo}`,
+      sessionDate: attendDate,
+      topic: finalTopic,
+      description,
       divisionTarget: division,
-      groupId: selectedGroupId || null,
       records: roster.map(st => ({
         studentId: st._id,
         status: attendanceMap[st._id]
       }))
     };
 
-    const res = await fetch('http://localhost:5000/api/attendance/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    if (res.ok) {
-      setFacultyMsg('Attendance successfully submitted and recorded in database!');
-    } else {
-      setFacultyMsg('Failed to submit attendance.');
+    try {
+      const res = await fetch('http://localhost:5000/api/attendance/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setSubmitMsg('Attendance successfully submitted and recorded in database!');
+        setTimeout(() => {
+          setFacultySubView('main');
+        }, 1200);
+      } else {
+        setSubmitMsg('Failed to record attendance');
+      }
+    } catch (err) {
+      setSubmitMsg('Server connection failed');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // History & Edit
-  const fetchHistory = async () => {
-    const res = await fetch(`http://localhost:5000/api/attendance/history?semester=${semester}`);
-    const data = await res.json();
-    setHistorySessions(data);
-  };
-
-  const loadSessionForEdit = async (sessionId) => {
-    setSelectedSessionId(sessionId);
-    const res = await fetch(`http://localhost:5000/api/attendance/session/${sessionId}`);
-    const data = await res.json();
-    setEditSessionRecords(data);
-  };
-
-  const toggleIndividualRecord = async (recordId, currentStatus) => {
-    const nextStatus = currentStatus === 'PRESENT' ? 'ABSENT' : 'PRESENT';
-    const res = await fetch('http://localhost:5000/api/attendance/record/update', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recordId, status: nextStatus })
-    });
-    if (res.ok) {
-      setEditSessionRecords(prev => prev.map(r => r._id === recordId ? { ...r, status: nextStatus } : r));
+  // ---------------- VIEW ATTEND WORKFLOW (NOTEBOOK SECTION ①) ----------------
+  const handleOpenViewAttend = async () => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/attendance/history?semester=${semester}`);
+      const data = await res.json();
+      setHistorySessions(data || []);
+      setAttendPage(1);
+      setFacultySubView('view_attend');
+    } catch (err) {
+      console.error(err);
     }
   };
 
-  // Student Analytics
+  const handleOpenSessionModal = async (sessionId) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/attendance/session/${sessionId}`);
+      const data = await res.json();
+      setActiveSessionRecords(data || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // ---------------- VIEW SUBJECT WORKFLOW (NOTEBOOK SECTION ②) ----------------
+  const handleOpenViewSubject = () => {
+    setSubjectActiveTab('topic');
+    setFacultySubView('view_subject');
+  };
+
+  const handleGenerate75Report = async () => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/analytics/defaulters?semester=${semester}`);
+      const data = await res.json();
+      if (thresholdType === 'less_than') {
+        setReportResult(data.filter(d => parseFloat(d.percentage) < 75));
+      } else {
+        setReportResult(data.filter(d => parseFloat(d.percentage) >= 75));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // ---------------- STUDENT ANALYTICS ----------------
   const fetchStudentAnalytics = async () => {
     if (!searchRollNo) return;
     setStudentLoading(true);
     setStudentError('');
-    setStudentData(null);
     try {
       const res = await fetch(`http://localhost:5000/api/attendance/student/${searchRollNo}`);
       const data = await res.json();
-      if (res.ok) {
-        setStudentData(data);
-      } else {
-        setStudentError(data.message || 'Error fetching student record');
-      }
+      if (res.ok) setStudentData(data);
+      else { setStudentError(data.message || 'Error'); setStudentData(null); }
     } catch (err) {
       setStudentError('Cannot connect to server');
     } finally {
@@ -219,39 +261,30 @@ export default function App() {
     }
   };
 
-  // Defaulters
-  const fetchDefaulters = async () => {
-    try {
-      const res = await fetch(`http://localhost:5000/api/analytics/defaulters?semester=${defaulterSem}`);
-      const data = await res.json();
-      setDefaulters(data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  useEffect(() => {
+    if (activeTab === 'student') fetchStudentAnalytics();
+  }, [activeTab]);
 
-  // CSV Upload
+  // Admin CSV Upload
   const handleCsvUpload = async (e) => {
     e.preventDefault();
     if (!csvFile) return;
     const formData = new FormData();
     formData.append('file', csvFile);
-
-    const res = await fetch('http://localhost:5000/api/students/import-csv', {
-      method: 'POST',
-      body: formData
-    });
-    const data = await res.json();
-    setAdminMsg(data.message || 'Upload complete');
+    try {
+      const res = await fetch('http://localhost:5000/api/students/import-csv', { method: 'POST', body: formData });
+      const data = await res.json();
+      setAdminMsg(data.message || 'Upload complete');
+    } catch (err) {
+      setAdminMsg('Upload failed');
+    }
   };
 
-  useEffect(() => {
-    if (activeTab === 'history') fetchHistory();
-    if (activeTab === 'defaulters') fetchDefaulters();
-    if (activeTab === 'student') fetchStudentAnalytics();
-  }, [activeTab, semester, defaulterSem]);
+  const selectedSubjectObj = subjects.find(s => s._id === selectedSubjectId);
 
-  // ---------------- LOGIN SCREEN ----------------
+  // =========================================================================
+  // LOGIN SCREEN
+  // =========================================================================
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -287,356 +320,728 @@ export default function App() {
           </form>
 
           <div className="mt-6 pt-4 border-t text-center text-xs text-slate-500 space-y-1">
-            <p>Faculty Demo: <b>faculty@college.edu</b> / 123456</p>
-            <p>Admin Demo: <b>admin@college.edu</b> / 123456</p>
-            <p>Student Demo: <b>aarav@college.edu</b> / 123456</p>
+            <p>Faculty: <b>faculty@college.edu</b> / 123456</p>
+            <p>Student: <b>divyvaghela63@gmail.com</b> / 123456</p>
+            <p>Admin: <b>admin@college.edu</b> / 123456</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // ---------------- MAIN DASHBOARD ----------------
+  // =========================================================================
+  // MAIN DASHBOARD LAYOUT
+  // =========================================================================
   return (
-    <div className="min-h-screen bg-slate-100 p-4 md:p-8 font-sans">
+    <div className="min-h-screen bg-slate-100 p-3 md:p-6 font-sans">
       <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
-
-        {/* Header */}
-        <div className="bg-slate-900 p-6 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        
+        {/* Top Header */}
+        <div className="bg-slate-900 p-5 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800">
           <div>
-            <h1 className="text-2xl font-black tracking-tight">Integrated M.Sc (Computer Science)</h1>
-            <p className="text-slate-400 text-sm">
+            <h1 className="text-xl md:text-2xl font-black tracking-tight">Integrated M.Sc (Computer Science)</h1>
+            <p className="text-slate-400 text-xs mt-0.5">
               Logged in: <b className="text-indigo-400">{user.name} ({user.role})</b>
             </p>
           </div>
-
-          {/* Navigation Tabs */}
-          <div className="flex flex-wrap items-center bg-slate-800 p-1 rounded-xl border border-slate-700 gap-1">
+          <div className="flex flex-wrap items-center bg-slate-800 p-1 rounded-xl border border-slate-700 gap-1 text-xs font-bold">
             {(user.role === 'FACULTY' || user.role === 'ADMIN') && (
-              <>
-                <button
-                  onClick={() => setActiveTab('faculty')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                    activeTab === 'faculty' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  Mark Attendance
-                </button>
-                <button
-                  onClick={() => setActiveTab('history')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                    activeTab === 'history' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  History & Edit
-                </button>
-              </>
-            )}
-
-            {user.role === 'ADMIN' && (
-              <button
-                onClick={() => setActiveTab('admin')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                  activeTab === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-                }`}
+              <button 
+                onClick={() => { setActiveTab('faculty'); setFacultySubView('main'); }} 
+                className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'faculty' ? 'bg-indigo-600 text-white' : 'text-slate-300'}`}
               >
-                CSV Import
+                Faculty Page
               </button>
             )}
-
-            <button
-              onClick={() => setActiveTab('student')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'student' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-              }`}
+            <button 
+              onClick={() => setActiveTab('student')} 
+              className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'student' ? 'bg-indigo-600 text-white' : 'text-slate-300'}`}
             >
-              Student Analytics
+              Student Portal
             </button>
-
-            <button
-              onClick={() => setActiveTab('defaulters')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === 'defaulters' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Defaulter List
-            </button>
-
-            <button
-              onClick={handleLogout}
-              className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg ml-1"
-            >
+            {user.role === 'ADMIN' && (
+              <button 
+                onClick={() => setActiveTab('admin')} 
+                className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-300'}`}
+              >
+                Admin CSV
+              </button>
+            )}
+            <button onClick={handleLogout} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg ml-2">
               Logout
             </button>
           </div>
         </div>
 
-        {/* ================= TAB 1: FACULTY ATTENDANCE MARKING ================= */}
+        {/* ========================================================================= */}
+        {/* FACULTY PORTAL (EXACT NOTEBOOK WIREFRAME 4-BUTTON ARCHITECTURE)            */}
+        {/* ========================================================================= */}
         {activeTab === 'faculty' && (
-          <div className="p-6 md:p-8">
-            {todaySchedule.length > 0 && (
-              <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
-                <span className="text-xs font-bold uppercase text-indigo-900 block mb-2">Today's Scheduled Lectures:</span>
-                <div className="flex flex-wrap gap-2">
-                  {todaySchedule.map(s => (
-                    <button
-                      key={s._id}
-                      onClick={() => {
-                        setSelectedSubjectId(s.subjectId._id);
-                        setSlot(s.slot);
-                      }}
-                      className="bg-white border border-indigo-300 text-indigo-800 text-xs px-3 py-1.5 rounded-lg font-bold hover:bg-indigo-600 hover:text-white transition"
-                    >
-                      {s.slot} ➔ {s.subjectId.name} ({s.subjectId.subjectType})
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+          <div className="p-4 md:p-8">
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Semester (1-10)</label>
-                <select
-                  className="w-full border rounded-lg p-2.5 bg-white text-sm font-medium"
-                  value={semester}
-                  onChange={e => setSemester(e.target.value)}
-                >
-                  {[...Array(10)].map((_, i) => (
-                    <option key={i + 1} value={i + 1}>Semester {i + 1}</option>
-                  ))}
-                </select>
-              </div>
+            {/* ----------------- SUB-VIEW: MAIN FACULTY PAGE (4 BUTTONS) ----------------- */}
+            {facultySubView === 'main' && (
+              <div className="space-y-6">
 
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Subject & Track</label>
-                <select
-                  className="w-full border rounded-lg p-2.5 bg-white text-sm font-medium"
-                  value={selectedSubjectId}
-                  onChange={e => {
-                    setSelectedSubjectId(e.target.value);
-                    setSelectedGroupId('');
-                    setIsGroupSelectNeeded(false);
-                  }}
-                >
-                  {subjects.map(s => (
-                    <option key={s._id} value={s._id}>
-                      {s.name} ({s.subjectType})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Division Filter</label>
-                <select
-                  className="w-full border rounded-lg p-2.5 bg-white text-sm font-medium"
-                  value={division}
-                  onChange={e => setDivision(e.target.value)}
-                >
-                  <option value="ALL">All Batches Combined</option>
-                  <option value="Div-1">Division 1 (1-60)</option>
-                  <option value="Div-2">Division 2 (61-120)</option>
-                </select>
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  onClick={fetchRoster}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-lg transition"
-                >
-                  {loading ? 'Loading...' : 'Load Students'}
-                </button>
-              </div>
-            </div>
-
-            {isGroupSelectNeeded && (
-              <div className="mb-6 p-4 bg-amber-50 border border-amber-300 rounded-xl">
-                <p className="text-xs font-black uppercase text-amber-900 mb-2">Research Project / 4-Student Group Selection:</p>
-                <div className="flex gap-4">
-                  <select
-                    className="w-full border rounded-lg p-2 bg-white text-sm font-medium"
-                    value={selectedGroupId}
-                    onChange={e => setSelectedGroupId(e.target.value)}
-                  >
-                    <option value="">-- Choose Assigned Project Group --</option>
-                    {groups.map(g => (
-                      <option key={g._id} value={g._id}>{g.groupName} (Mentor: {g.mentorName})</option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={fetchRoster}
-                    className="bg-amber-600 hover:bg-amber-700 text-white px-5 py-2 rounded-lg font-bold text-sm whitespace-nowrap"
-                  >
-                    Load Group
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {facultyMsg && (
-              <div className="mb-6 p-4 bg-emerald-100 border border-emerald-300 text-emerald-900 rounded-xl font-semibold">
-                {facultyMsg}
-              </div>
-            )}
-
-            {roster.length > 0 && (
-              <div>
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
-                  <span className="text-sm font-bold text-slate-700">
-                    Active Enrolled Students: <span className="text-indigo-600 font-extrabold">{roster.length}</span>
-                  </span>
-                  <div className="flex gap-2">
-                    <a
-                      href={`http://localhost:5000/api/attendance/export/csv?subjectId=${selectedSubjectId}`}
-                      className="text-xs bg-slate-700 hover:bg-slate-800 text-white px-3 py-2 rounded-lg font-bold"
-                    >
-                      Export CSV
-                    </a>
-                    <button onClick={() => markAll('PRESENT')} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg font-bold">Mark All Present</button>
-                    <button onClick={() => markAll('ABSENT')} className="text-xs bg-rose-600 hover:bg-rose-700 text-white px-3 py-2 rounded-lg font-bold">Mark All Absent</button>
-                  </div>
-                </div>
-
-                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-100 border-b">
-                      <tr>
-                        <th className="p-3.5 text-xs font-bold text-slate-600 uppercase">Roll No</th>
-                        <th className="p-3.5 text-xs font-bold text-slate-600 uppercase">Name</th>
-                        <th className="p-3.5 text-xs font-bold text-slate-600 uppercase">Division</th>
-                        <th className="p-3.5 text-xs font-bold text-slate-600 uppercase">Track</th>
-                        <th className="p-3.5 text-xs font-bold text-slate-600 uppercase text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {roster.map(st => {
-                        const isPresent = attendanceMap[st._id] === 'PRESENT';
-                        return (
-                          <tr key={st._id} className="hover:bg-slate-50 transition">
-                            <td className="p-3.5 font-bold text-slate-800">{st.rollNo}</td>
-                            <td className="p-3.5 text-slate-700 font-medium">{st.name}</td>
-                            <td className="p-3.5 text-slate-500">{st.division}</td>
-                            <td className="p-3.5">
-                              <span className={`text-xs px-2.5 py-1 rounded-md font-extrabold ${
-                                st.track === 'IS' ? 'bg-purple-100 text-purple-700' :
-                                st.track === 'AI' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
-                              }`}>
-                                {st.track}
-                              </span>
-                            </td>
-                            <td className="p-3.5 text-center">
-                              <button
-                                onClick={() => toggleStatus(st._id)}
-                                className={`px-5 py-1.5 rounded-full text-xs font-extrabold transition shadow-sm ${
-                                  isPresent ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-rose-600 text-white hover:bg-rose-700'
-                                }`}
-                              >
-                                {isPresent ? 'PRESENT' : 'ABSENT'}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mt-6 flex justify-end">
-                  <button
-                    onClick={handleSubmitAttendance}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-3 px-8 rounded-xl shadow-lg transition"
-                  >
-                    Submit Attendance Session
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ================= TAB 2: HISTORY & REAL-TIME EDIT ================= */}
-        {activeTab === 'history' && (
-          <div className="p-6 md:p-8">
-            <h2 className="text-lg font-black text-slate-800 uppercase mb-4">Past Attendance Sessions</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
-                {historySessions.map(sess => (
-                  <div
-                    key={sess._id}
-                    onClick={() => loadSessionForEdit(sess._id)}
-                    className={`p-4 rounded-xl border cursor-pointer transition ${selectedSessionId === sess._id ? 'border-indigo-600 bg-indigo-50/50' : 'bg-white hover:bg-slate-50'}`}
-                  >
-                    <div className="flex justify-between items-start">
-                      <span className="font-bold text-slate-800 text-sm">{sess.subjectId?.name}</span>
-                      <span className="text-xs bg-slate-200 px-2 py-0.5 rounded font-bold">{sess.slot}</span>
+                {/* Today's Scheduled Lectures Banner */}
+                {todaySchedule.length > 0 && (
+                  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl">
+                    <span className="text-xs font-black uppercase text-indigo-900 block mb-2.5 tracking-wider">
+                      TODAY'S SCHEDULED LECTURES:
+                    </span>
+                    <div className="flex flex-wrap gap-2.5">
+                      {todaySchedule.map(s => (
+                        <button
+                          key={s._id}
+                          onClick={() => {
+                            setSelectedSubjectId(s.subjectId._id);
+                            setSlot(s.slot);
+                            setTimeFrom(s.slot.split(' - ')[0]?.trim() || '10:30');
+                            setTimeTo(s.slot.split(' - ')[1]?.trim() || '11:30');
+                          }}
+                          className={`border text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm ${
+                            selectedSubjectId === s.subjectId._id 
+                              ? 'bg-indigo-600 text-white border-indigo-600' 
+                              : 'bg-white border-indigo-300 text-indigo-800 hover:bg-indigo-50'
+                          }`}
+                        >
+                          {s.slot} ➔ {s.subjectId.name} ({s.subjectId.subjectType})
+                        </button>
+                      ))}
                     </div>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Faculty: {sess.facultyName} | Date: {new Date(sess.sessionDate).toLocaleDateString()}
-                    </p>
                   </div>
-                ))}
-              </div>
+                )}
 
-              <div>
-                {editSessionRecords.length > 0 ? (
-                  <div className="border rounded-xl p-4 bg-slate-50">
-                    <span className="text-xs font-black uppercase text-slate-700 block mb-3">Edit Records (Click button to change status):</span>
-                    <div className="space-y-2 max-h-[420px] overflow-y-auto">
-                      {editSessionRecords.map(r => (
-                        <div key={r._id} className="flex justify-between items-center p-2.5 bg-white border rounded-lg">
+                {/* Top Filter Grid */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 grid grid-cols-1 md:grid-cols-4 gap-4 items-end shadow-sm">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">Semester (1-10)</label>
+                    <select
+                      className="w-full border rounded-xl p-2.5 bg-white text-sm font-semibold"
+                      value={semester}
+                      onChange={e => setSemester(Number(e.target.value))}
+                    >
+                      {[...Array(10)].map((_, i) => (
+                        <option key={i + 1} value={i + 1}>Semester {i + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">Subject & Track</label>
+                    <select
+                      className="w-full border rounded-xl p-2.5 bg-white text-sm font-semibold"
+                      value={selectedSubjectId}
+                      onChange={e => setSelectedSubjectId(e.target.value)}
+                    >
+                      {subjects.map(s => (
+                        <option key={s._id} value={s._id}>
+                          {s.name} ({s.subjectType})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">Division Filter</label>
+                    <select
+                      className="w-full border rounded-xl p-2.5 bg-white text-sm font-semibold"
+                      value={division}
+                      onChange={e => setDivision(e.target.value)}
+                    >
+                      <option value="ALL">All Batches Combined</option>
+                      <option value="Div-1">Division 1 (1-60)</option>
+                      <option value="Div-2">Division 2 (61-120)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <button
+                      onClick={loadRosterForAttendance}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-sm transition shadow-md"
+                    >
+                      {loading ? 'Loading...' : 'Load Students'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* THE 2 CARD BOXES CONTAINING 4 BUTTONS (NOTEBOOK SKETCH) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  
+                  {/* BOX 1: [View Attend] & [Attend Report (75%)] */}
+                  <div className="border border-slate-300 bg-white rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded">Card 1</span>
+                      <h3 className="text-lg font-black text-slate-800 mt-2">Attendance & Reports</h3>
+                      <p className="text-xs text-slate-500 mt-1">Date-wise sessions, CSV downloads, and 75% attendance criteria evaluation.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-6">
+                      {/* Button 1: View Attend */}
+                      <button 
+                        onClick={handleOpenViewAttend}
+                        className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-sm"
+                      >
+                        View Attend ➔
+                      </button>
+
+                      {/* Button 2: Attend Report */}
+                      <button 
+                        onClick={() => {
+                          setSubjectActiveTab('report_75');
+                          setFacultySubView('view_subject');
+                        }}
+                        className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition"
+                      >
+                        Attend Report (75%)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* BOX 2: [View Subject] & [Take Att] */}
+                  <div className="border border-indigo-200 bg-indigo-50/30 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Card 2</span>
+                      <h3 className="text-lg font-black text-slate-800 mt-2">Curriculum & Marking</h3>
+                      <p className="text-xs text-slate-500 mt-1">Subject modules, topic breakdowns, or launch the live attendance register.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mt-6">
+                      {/* Button 3: View Subject */}
+                      <button 
+                        onClick={handleOpenViewSubject}
+                        className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-sm"
+                      >
+                        View Subject ➔
+                      </button>
+
+                      {/* Button 4: Take Att */}
+                      <button 
+                        onClick={loadRosterForAttendance}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition"
+                      >
+                        Take Att ➔
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
+            {/* ----------------- SUB-VIEW ①: VIEW ATTEND (DATE-WISE CARDS) ----------------- */}
+            {facultySubView === 'view_attend' && (
+              <div className="space-y-6">
+                
+                {/* Header with Navigation and Actions */}
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b pb-4">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">View Attendance (Date Wise)</h2>
+                    <p className="text-xs text-slate-500">Filter by selected parameters and examine each logged session</p>
+                  </div>
+                  
+                  {/* Action Buttons: Download, Take Attend, Go Back */}
+                  <div className="flex flex-wrap gap-2">
+                    <a 
+                      href={`http://localhost:5000/api/attendance/export/csv?subjectId=${selectedSubjectId}`} 
+                      className="flex items-center gap-1 bg-slate-800 hover:bg-black text-white text-xs font-bold px-3 py-2 rounded-xl transition shadow-sm"
+                    >
+                      <Download className="h-3.5 w-3.5" /> Download
+                    </a>
+                    <button 
+                      onClick={loadRosterForAttendance}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-2 rounded-xl transition shadow-sm"
+                    >
+                      Take Attend
+                    </button>
+                    <button 
+                      onClick={() => setFacultySubView('main')} 
+                      className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-900 border border-slate-300 rounded-xl px-3 py-2 transition bg-white"
+                    >
+                      <ChevronLeft className="h-4 w-4" /> Go Back
+                    </button>
+                  </div>
+                </div>
+
+                {/* Date-wise Cards Grid (From Notebook Wireframe Section ①) */}
+                {historySessions.length === 0 ? (
+                  <div className="p-12 text-center border-2 border-dashed rounded-2xl text-slate-400 text-sm font-semibold">
+                    No attendance records found for this semester. Click <b>Take Attend</b> to mark the first session!
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {historySessions.slice((attendPage - 1) * 6, attendPage * 6).map(sess => {
+                      const timeFromStr = sess.slot?.split(' - ')[0] || '10:30 AM';
+                      const timeToStr = sess.slot?.split(' - ')[1] || '11:30 AM';
+                      return (
+                        <div key={sess._id} className="border border-slate-200 bg-white hover:border-indigo-400 p-5 rounded-2xl shadow-sm flex flex-col justify-between transition">
                           <div>
-                            <span className="font-bold text-sm">#{r.studentId?.rollNo} - {r.studentId?.name}</span>
-                            <span className="text-xs text-slate-400 block">{r.studentId?.track} | {r.studentId?.division}</span>
+                            <div className="flex justify-between items-start mb-2">
+                              <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                                {sess.subjectId?.subjectCode || 'LEC'}
+                              </span>
+                              <span className="text-[11px] font-bold text-slate-400">{sess.divisionTarget || 'All Div'}</span>
+                            </div>
+
+                            <h4 className="font-bold text-slate-800 text-sm leading-snug mb-3">
+                              {sess.subjectId?.name || 'Class Lecture'}
+                            </h4>
+
+                            {/* Card Details: Date, Time From, Time To */}
+                            <div className="space-y-1 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl">
+                              <div className="flex justify-between">
+                                <span className="font-bold text-slate-400">Date:</span>
+                                <span className="font-extrabold text-slate-700">{new Date(sess.sessionDate).toLocaleDateString()}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="font-bold text-slate-400">Time From:</span>
+                                <span className="font-bold text-slate-700">{timeFromStr}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="font-bold text-slate-400">Time To:</span>
+                                <span className="font-bold text-slate-700">{timeToStr}</span>
+                              </div>
+                              <div className="flex justify-between pt-1 border-t">
+                                <span className="font-bold text-slate-400">Faculty:</span>
+                                <span className="font-bold text-slate-700 truncate">{sess.facultyName}</span>
+                              </div>
+                            </div>
                           </div>
-                          <button
-                            onClick={() => toggleIndividualRecord(r._id, r.status)}
-                            className={`px-3 py-1 rounded-full text-xs font-bold ${r.status === 'PRESENT' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'}`}
+
+                          {/* View Button */}
+                          <button 
+                            onClick={() => handleOpenSessionModal(sess._id)}
+                            className="mt-4 w-full bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition"
                           >
-                            {r.status}
+                            View Details ➔
                           </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Pagination Controls (< 1 2 3 > from Notebook Wireframe) */}
+                <div className="flex justify-between items-center pt-2">
+                  <span className="text-xs text-slate-500 font-bold">
+                    Total Sessions Conducted: {historySessions.length}
+                  </span>
+                  
+                  <div className="flex items-center gap-1.5">
+                    <button 
+                      disabled={attendPage === 1}
+                      onClick={() => setAttendPage(p => Math.max(p - 1, 1))}
+                      className="p-2 border rounded-xl bg-white disabled:opacity-40 hover:bg-slate-50 shadow-sm"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    {[...Array(Math.ceil(historySessions.length / 6) || 1)].map((_, i) => (
+                      <button
+                        key={i + 1}
+                        onClick={() => setAttendPage(i + 1)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm ${
+                          attendPage === i + 1 ? 'bg-indigo-600 text-white' : 'bg-white border text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+
+                    <button 
+                      disabled={attendPage * 6 >= historySessions.length}
+                      onClick={() => setAttendPage(p => p + 1)}
+                      className="p-2 border rounded-xl bg-white disabled:opacity-40 hover:bg-slate-50 shadow-sm"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Session Details Modal */}
+                {activeSessionRecords && (
+                  <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-2xl max-w-lg w-full p-6 max-h-[85vh] flex flex-col shadow-2xl">
+                      <div className="flex justify-between items-center border-b pb-3 mb-3">
+                        <h3 className="font-black text-slate-800 text-sm uppercase">Session Attendance Register</h3>
+                        <button onClick={() => setActiveSessionRecords(null)} className="text-slate-400 hover:text-slate-700 font-black text-lg">✕</button>
+                      </div>
+                      <div className="overflow-y-auto space-y-2 flex-1 pr-1 text-xs">
+                        {activeSessionRecords.map(r => (
+                          <div key={r._id} className="flex justify-between items-center p-2.5 bg-slate-50 border rounded-xl">
+                            <div>
+                              <span className="font-bold text-slate-800">#{r.studentId?.rollNo} - {r.studentId?.name}</span>
+                              <span className="block text-[10px] text-slate-400">{r.studentId?.track} • {r.studentId?.division}</span>
+                            </div>
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold ${r.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                              {r.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            )}
+
+            {/* ----------------- SUB-VIEW ②: VIEW SUBJECT (4 ACTIONS: TOPIC, VIEW ATT, TAKE ATT, VIEW REPORT) ----------------- */}
+            {facultySubView === 'view_subject' && (
+              <div className="space-y-6">
+                
+                {/* Header */}
+                <div className="flex justify-between items-center border-b pb-4">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">
+                      Subject Overview: {selectedSubjectObj?.name || 'Selected Subject'}
+                    </h2>
+                    <p className="text-xs text-slate-500 font-semibold">{selectedSubjectObj?.subjectCode} • {selectedSubjectObj?.subjectType}</p>
+                  </div>
+                  <button 
+                    onClick={() => setFacultySubView('main')} 
+                    className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-900 border border-slate-300 rounded-xl px-3 py-1.5 transition bg-white"
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Go Back
+                  </button>
+                </div>
+
+                {/* 4 SUB-BUTTONS (EXACTLY FROM NOTEBOOK SECTION ②) */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <button
+                    onClick={() => setSubjectActiveTab('topic')}
+                    className={`p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border ${
+                      subjectActiveTab === 'topic' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    Topic
+                  </button>
+
+                  <button
+                    onClick={handleOpenViewAttend}
+                    className="p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                  >
+                    View Att
+                  </button>
+
+                  <button
+                    onClick={loadRosterForAttendance}
+                    className="p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                  >
+                    Take Att
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setSubjectActiveTab('report_75');
+                      handleGenerate75Report();
+                    }}
+                    className={`p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border ${
+                      subjectActiveTab === 'report_75' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    View Report (75%)
+                  </button>
+                </div>
+
+                {/* Content based on sub-button */}
+                {subjectActiveTab === 'topic' && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
+                    <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider">Curriculum Module Topics</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {[
+                        'Unit 1: Fundamentals and Theoretical Architecture',
+                        'Unit 2: Framework Implementation & Pipeline Design',
+                        'Unit 3: Security Vectors, Testing & Validation',
+                        'Unit 4: Advanced Real-Time Case Studies & Lab Evaluations'
+                      ].map((t, idx) => (
+                        <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 font-bold text-xs text-slate-700 flex items-center gap-3">
+                          <span className="h-6 w-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs font-black">{idx + 1}</span>
+                          {t}
                         </div>
                       ))}
                     </div>
                   </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center p-8 border border-dashed rounded-xl text-slate-400 text-sm">
-                    Select a session from the left to view & edit records
+                )}
+
+                {subjectActiveTab === 'report_75' && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <div>
+                        <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider">75% Attendance Compliance Check</h3>
+                        <p className="text-xs text-slate-400">Exam eligibility check based on 75% minimum threshold</p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <select 
+                          value={thresholdType} 
+                          onChange={e => setThresholdType(e.target.value)} 
+                          className="border rounded-xl p-2 bg-white text-xs font-bold"
+                        >
+                          <option value="less_than">Less than 75% (Defaulter List)</option>
+                          <option value="greater_than">Greater than / Equal 75% (Eligible List)</option>
+                        </select>
+
+                        <button 
+                          onClick={handleGenerate75Report}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                        >
+                          Generate Report
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Defaulter / Eligible Table */}
+                    {reportResult && (
+                      <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm mt-4">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead className="bg-slate-100 border-b text-slate-600 font-bold uppercase">
+                            <tr>
+                              <th className="p-3">Roll No</th>
+                              <th className="p-3">Student Name</th>
+                              <th className="p-3">Division</th>
+                              <th className="p-3">Track</th>
+                              <th className="p-3 text-right">Attendance %</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y">
+                            {reportResult.length === 0 ? (
+                              <tr>
+                                <td colSpan={5} className="p-6 text-center text-slate-400 font-medium">
+                                  No students match the criteria for Semester {semester}.
+                                </td>
+                              </tr>
+                            ) : (
+                              reportResult.map(r => (
+                                <tr key={r.rollNo} className="hover:bg-slate-50">
+                                  <td className="p-3 font-bold">#{r.rollNo}</td>
+                                  <td className="p-3 font-semibold">{r.name}</td>
+                                  <td className="p-3 text-slate-500">{r.division}</td>
+                                  <td className="p-3 font-bold text-indigo-600">{r.track}</td>
+                                  <td className={`p-3 text-right font-black ${parseFloat(r.percentage) >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                    {r.percentage}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 )}
+
               </div>
+            )}
 
-            </div>
+            {/* ----------------- SUB-VIEW: TAKE ATTENDANCE (PAGE 2 NOTEBOOK) ----------------- */}
+            {facultySubView === 'take_attend' && (
+              <div className="max-w-5xl mx-auto space-y-6">
+                
+                {/* Header with Go Back */}
+                <div className="flex justify-between items-center border-b pb-4">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">Take Attendance</h2>
+                    <p className="text-xs text-slate-500 font-medium">Record individual student attendance and lecture logs</p>
+                  </div>
+                  <button 
+                    onClick={() => setFacultySubView('main')} 
+                    className="flex items-center gap-1 text-xs font-bold text-slate-600 hover:text-slate-900 border border-slate-300 rounded-xl px-3.5 py-1.5 transition bg-white"
+                  >
+                    <ChevronLeft className="h-4 w-4" /> Go Back
+                  </button>
+                </div>
+
+                {/* Selected Options Card (Top Wireframe Card from Page 2) */}
+                <div className="bg-slate-900 text-white p-5 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-4 text-xs shadow-lg">
+                  <div>
+                    <span className="text-slate-400 block uppercase text-[10px] font-bold">Course & Semester</span>
+                    <span className="font-extrabold text-white text-sm">{course} (Sem {semester})</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block uppercase text-[10px] font-bold">Batch & Division</span>
+                    <span className="font-extrabold text-indigo-300 text-sm">Sem {semester} - {division}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block uppercase text-[10px] font-bold">Subject Code & Name</span>
+                    <span className="font-extrabold text-white text-sm truncate block">
+                      {selectedSubjectObj?.subjectCode}: {selectedSubjectObj?.name}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block uppercase text-[10px] font-bold">Teacher / Username</span>
+                    <span className="font-extrabold text-emerald-400 text-sm truncate block">{user.name}</span>
+                  </div>
+                </div>
+
+                {/* Date, Time Slot & Lecture Details */}
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Select Date</label>
+                    <input 
+                      type="date" 
+                      value={attendDate} 
+                      onChange={e => setAttendDate(e.target.value)} 
+                      className="w-full border rounded-xl p-2.5 text-sm font-semibold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">From Time</label>
+                    <input 
+                      type="time" 
+                      value={timeFrom} 
+                      onChange={e => setTimeFrom(e.target.value)} 
+                      className="w-full border rounded-xl p-2.5 text-sm font-semibold bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">To Time</label>
+                    <input 
+                      type="time" 
+                      value={timeTo} 
+                      onChange={e => setTimeTo(e.target.value)} 
+                      className="w-full border rounded-xl p-2.5 text-sm font-semibold bg-white"
+                    />
+                  </div>
+
+                  {/* Topic Dropdown with 'Other' dynamic input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Topic</label>
+                    <select 
+                      value={topicOption} 
+                      onChange={e => setTopicOption(e.target.value)} 
+                      className="w-full border rounded-xl p-2.5 text-sm font-semibold bg-white"
+                    >
+                      <option value="Default Syllabus">Default Syllabus Topic</option>
+                      <option value="Lab Practical Evaluation">Lab Practical Evaluation</option>
+                      <option value="Seminar / Presentation">Seminar / Presentation</option>
+                      <option value="Other">Other (Custom Topic)</option>
+                    </select>
+                    {topicOption === 'Other' && (
+                      <input 
+                        type="text" 
+                        placeholder="Enter custom topic name..." 
+                        value={customTopic} 
+                        onChange={e => setCustomTopic(e.target.value)} 
+                        className="mt-2 w-full border rounded-xl p-2 text-xs font-medium"
+                      />
+                    )}
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Description</label>
+                    <input 
+                      type="text" 
+                      placeholder="Brief remarks or lecture notes..." 
+                      value={description} 
+                      onChange={e => setDescription(e.target.value)} 
+                      className="w-full border rounded-xl p-2.5 text-sm font-medium bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Today Attend Percentage Gauge */}
+                <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div>
+                    <span className="text-xs font-black uppercase text-indigo-900 block">Today Attend Percentage</span>
+                    <span className="text-xs text-slate-600 font-medium">
+                      Present: <b className="text-indigo-700">{presentCount}</b> / Total Enrolled: <b className="text-slate-800">{totalStudents}</b>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-2xl font-black ${todayPercentage >= 75 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {todayPercentage}%
+                    </span>
+                    <div className="flex gap-2">
+                      <button onClick={() => markAll('PRESENT')} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg shadow-sm">
+                        Mark All Present
+                      </button>
+                      <button onClick={() => markAll('ABSENT')} className="text-xs bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1.5 rounded-lg shadow-sm">
+                        Mark All Absent
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Student Roster Table */}
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-100 border-b text-xs font-bold text-slate-600 uppercase">
+                      <tr>
+                        <th className="p-3.5">Roll No</th>
+                        <th className="p-3.5">Student Name</th>
+                        <th className="p-3.5">Track</th>
+                        <th className="p-3.5">Division</th>
+                        <th className="p-3.5 text-center">Mark Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y text-sm">
+                      {roster.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="p-6 text-center text-slate-400 font-medium">
+                            No students enrolled in this semester/track combination.
+                          </td>
+                        </tr>
+                      ) : (
+                        roster.map(st => {
+                          const isPresent = attendanceMap[st._id] === 'PRESENT';
+                          return (
+                            <tr key={st._id} className="hover:bg-slate-50 transition">
+                              <td className="p-3.5 font-bold text-slate-800">#{st.rollNo}</td>
+                              <td className="p-3.5 font-semibold text-slate-700">{st.name}</td>
+                              <td className="p-3.5">
+                                <span className="text-xs px-2.5 py-0.5 rounded-md font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  {st.track}
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-slate-500 text-xs font-bold">{st.division}</td>
+                              <td className="p-3.5 text-center">
+                                <button 
+                                  onClick={() => toggleStatus(st._id)} 
+                                  className={`px-5 py-1.5 rounded-full text-xs font-extrabold transition shadow-sm ${
+                                    isPresent ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-rose-600 text-white hover:bg-rose-700'
+                                  }`}
+                                >
+                                  {isPresent ? 'PRESENT' : 'ABSENT'}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {submitMsg && (
+                  <div className={`p-4 rounded-xl text-center font-bold text-xs ${submitMsg.includes('success') ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                    {submitMsg}
+                  </div>
+                )}
+
+                {/* Final Submit Button */}
+                <div className="flex justify-end pt-2">
+                  <button 
+                    disabled={isSubmitting || roster.length === 0} 
+                    onClick={handleSubmitAttendance} 
+                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold px-8 py-3 rounded-xl shadow-lg transition text-sm uppercase tracking-wider"
+                  >
+                    {isSubmitting ? 'Recording...' : 'Take Attend (Submit)'}
+                  </button>
+                </div>
+
+              </div>
+            )}
+
           </div>
         )}
 
-        {/* ================= TAB 3: CSV BULK IMPORT (ADMIN) ================= */}
-        {activeTab === 'admin' && (
-          <div className="p-6 md:p-8 max-w-lg mx-auto">
-            <h2 className="text-lg font-black text-slate-800 uppercase mb-2">Student Bulk CSV Import</h2>
-            <p className="text-xs text-slate-500 mb-6">Upload CSV file with columns: <b>rollNo, name, currentSem, division, track</b></p>
-
-            <form onSubmit={handleCsvUpload} className="space-y-4 bg-slate-50 p-6 rounded-xl border">
-              <input
-                type="file"
-                accept=".csv"
-                onChange={e => setCsvFile(e.target.files[0])}
-                className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700"
-              />
-              <button className="w-full bg-slate-900 hover:bg-black text-white font-bold py-2 rounded-lg text-sm">
-                Upload & Sync Students
-              </button>
-            </form>
-            {adminMsg && <p className="mt-4 p-3 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold text-center">{adminMsg}</p>}
-          </div>
-        )}
-
-        {/* ================= TAB 4: STUDENT ANALYTICS (MODERN DASHBOARD) ================= */}
+        {/* ========================================================================= */}
+        {/* STUDENT PORTAL (METRICS, ATTENDANCE CHECKER & PROGRESS BARS)               */}
+        {/* ========================================================================= */}
         {activeTab === 'student' && (
           <div className="p-4 md:p-8 space-y-6 bg-slate-50/60 min-h-[500px]">
-            
-            {/* Shortage Alert Banner */}
             {studentData && studentData.isShortage && (
               <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3 text-rose-900 shadow-sm">
                 <AlertTriangle className="h-5 w-5 text-rose-600 flex-shrink-0" />
@@ -647,7 +1052,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Student Search & Quick Switcher */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
               <div className="text-xs font-bold text-slate-500 uppercase">
                 Active Student: <b className="text-indigo-600 text-sm">#{studentData?.student?.rollNo || searchRollNo} - {studentData?.student?.name || user.name}</b>
@@ -657,11 +1061,11 @@ export default function App() {
                   type="text"
                   value={searchRollNo}
                   onChange={e => setSearchRollNo(e.target.value)}
-                  placeholder="Roll No (e.g. 01, 56)"
+                  placeholder="Roll No (e.g. 56)"
                   className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold w-32 focus:outline-indigo-600"
                 />
-                <button
-                  onClick={fetchStudentAnalytics}
+                <button 
+                  onClick={fetchStudentAnalytics} 
                   className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg transition"
                 >
                   {studentLoading ? 'Loading...' : 'Check'}
@@ -677,19 +1081,16 @@ export default function App() {
 
             {studentData && (
               <>
-                {/* Metric Summary Cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Cumulative Attendance</span>
-                    <div className="flex items-baseline gap-2 mt-1">
-                      <span className={`text-3xl font-black ${studentData.overallPercentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {studentData.overallPercentage}%
-                      </span>
-                    </div>
+                    <p className={`text-3xl font-black mt-1 ${studentData.overallPercentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {studentData.overallPercentage}%
+                    </p>
                     <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
                       <div 
                         className={`h-full transition-all duration-500 ${studentData.overallPercentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`} 
-                        style={{ width: `${Math.min(studentData.overallPercentage, 100)}%` }}
+                        style={{ width: `${Math.min(studentData.overallPercentage, 100)}%` }} 
                       />
                     </div>
                   </div>
@@ -713,7 +1114,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Enrolled Subjects Performance Grid */}
                 <div>
                   <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide mb-3">Enrolled Subject Breakdown</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -737,7 +1137,7 @@ export default function App() {
                           <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                             <div 
                               className={`h-full transition-all duration-500 ${s.percentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                              style={{ width: `${Math.min(s.percentage, 100)}%` }}
+                              style={{ width: `${Math.min(s.percentage, 100)}%` }} 
                             />
                           </div>
                         </div>
@@ -750,57 +1150,25 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= TAB 5: DEFAULTER LIST ================= */}
-        {activeTab === 'defaulters' && (
-          <div className="p-6 md:p-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-lg font-black text-slate-800 uppercase">Attendance Defaulter List (&lt; 75%)</h2>
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold uppercase text-slate-600">Semester:</label>
-                <select
-                  className="border rounded p-1.5 bg-white text-sm font-bold"
-                  value={defaulterSem}
-                  onChange={e => setDefaulterSem(e.target.value)}
-                >
-                  {[...Array(10)].map((_, i) => (
-                    <option key={i + 1} value={i + 1}>Sem {i + 1}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {defaulters.length === 0 ? (
-              <div className="p-8 text-center bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold">
-                🎉 No defaulters found in Semester {defaulterSem}! All students have 75%+ attendance.
-              </div>
-            ) : (
-              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                <table className="w-full text-left border-collapse">
-                  <thead className="bg-rose-50 border-b text-xs font-bold text-rose-900 uppercase">
-                    <tr>
-                      <th className="p-3.5">Roll No</th>
-                      <th className="p-3.5">Name</th>
-                      <th className="p-3.5">Division</th>
-                      <th className="p-3.5">Track</th>
-                      <th className="p-3.5 text-center">Attended / Total</th>
-                      <th className="p-3.5 text-right">Attendance %</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {defaulters.map(d => (
-                      <tr key={d.rollNo} className="hover:bg-rose-50/50">
-                        <td className="p-3.5 font-bold text-slate-800">#{d.rollNo}</td>
-                        <td className="p-3.5 font-semibold text-slate-700">{d.name}</td>
-                        <td className="p-3.5 text-slate-500">{d.division}</td>
-                        <td className="p-3.5 font-bold text-indigo-600">{d.track}</td>
-                        <td className="p-3.5 text-center font-bold text-slate-600">{d.attended} / {d.conducted}</td>
-                        <td className="p-3.5 text-right font-black text-rose-600">{d.percentage}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+        {/* ========================================================================= */}
+        {/* ADMIN PORTAL (CSV BULK IMPORT)                                            */}
+        {/* ========================================================================= */}
+        {activeTab === 'admin' && (
+          <div className="p-6 md:p-8 max-w-lg mx-auto">
+            <h2 className="text-lg font-black text-slate-800 uppercase mb-2">Student Bulk CSV Import</h2>
+            <p className="text-xs text-slate-500 mb-6">Upload CSV file with columns: <b>rollNo, name, currentSem, division, track</b></p>
+            <form onSubmit={handleCsvUpload} className="space-y-4 bg-slate-50 p-6 rounded-xl border">
+              <input
+                type="file"
+                accept=".csv"
+                onChange={e => setCsvFile(e.target.files[0])}
+                className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700"
+              />
+              <button className="w-full bg-slate-900 hover:bg-black text-white font-bold py-2 rounded-lg text-sm">
+                Upload & Sync Students
+              </button>
+            </form>
+            {adminMsg && <p className="mt-4 p-3 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold text-center">{adminMsg}</p>}
           </div>
         )}
 
