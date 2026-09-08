@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { CheckCircle2, XCircle, AlertTriangle, Calendar, BookOpen, Clock, Award, Users } from 'lucide-react';
 
 export default function App() {
   // Auth State
@@ -247,7 +248,7 @@ export default function App() {
   useEffect(() => {
     if (activeTab === 'history') fetchHistory();
     if (activeTab === 'defaulters') fetchDefaulters();
-    if (activeTab === 'student' && user?.role === 'STUDENT') fetchStudentAnalytics();
+    if (activeTab === 'student') fetchStudentAnalytics();
   }, [activeTab, semester, defaulterSem]);
 
   // ---------------- LOGIN SCREEN ----------------
@@ -373,7 +374,6 @@ export default function App() {
         {/* ================= TAB 1: FACULTY ATTENDANCE MARKING ================= */}
         {activeTab === 'faculty' && (
           <div className="p-6 md:p-8">
-            {/* Timetable Quick Selector */}
             {todaySchedule.length > 0 && (
               <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
                 <span className="text-xs font-bold uppercase text-indigo-900 block mb-2">Today's Scheduled Lectures:</span>
@@ -632,87 +632,120 @@ export default function App() {
           </div>
         )}
 
-        {/* ================= TAB 4: STUDENT ANALYTICS ================= */}
+        {/* ================= TAB 4: STUDENT ANALYTICS (MODERN DASHBOARD) ================= */}
         {activeTab === 'student' && (
-          <div className="p-6 md:p-8">
-            <div className="max-w-md mx-auto mb-8">
-              <label className="block text-xs font-bold uppercase text-slate-600 mb-2">Enter Student Roll Number</label>
-              <div className="flex gap-2">
+          <div className="p-4 md:p-8 space-y-6 bg-slate-50/60 min-h-[500px]">
+            
+            {/* Shortage Alert Banner */}
+            {studentData && studentData.isShortage && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3 text-rose-900 shadow-sm">
+                <AlertTriangle className="h-5 w-5 text-rose-600 flex-shrink-0" />
+                <div className="text-xs md:text-sm">
+                  <span className="font-extrabold block">Attendance Shortage Alert (&lt; 75%)</span>
+                  Your total attendance is currently at {studentData.overallPercentage}%. Academic compliance requires at least 75% to appear in semester examinations.
+                </div>
+              </div>
+            )}
+
+            {/* Student Search & Quick Switcher */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="text-xs font-bold text-slate-500 uppercase">
+                Active Student: <b className="text-indigo-600 text-sm">#{studentData?.student?.rollNo || searchRollNo} - {studentData?.student?.name || user.name}</b>
+              </div>
+              <div className="flex gap-2 w-full sm:w-auto">
                 <input
                   type="text"
                   value={searchRollNo}
                   onChange={e => setSearchRollNo(e.target.value)}
-                  placeholder="e.g. 01, 03, 61..."
-                  className="flex-1 border p-2.5 rounded-lg font-bold text-slate-800"
+                  placeholder="Roll No (e.g. 01, 56)"
+                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold w-32 focus:outline-indigo-600"
                 />
                 <button
                   onClick={fetchStudentAnalytics}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 font-bold rounded-lg"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg transition"
                 >
-                  {studentLoading ? 'Checking...' : 'View'}
+                  {studentLoading ? 'Loading...' : 'Check'}
                 </button>
               </div>
-              {studentError && <p className="text-rose-600 text-xs font-bold mt-2">{studentError}</p>}
             </div>
 
-            {studentData && (
-              <div>
-                <div className="bg-slate-50 border p-6 rounded-2xl mb-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div>
-                    <span className="text-xs text-slate-400 font-bold uppercase">Name</span>
-                    <p className="font-extrabold text-slate-800 text-lg">{studentData.student.name}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 font-bold uppercase">Roll No & Sem</span>
-                    <p className="font-extrabold text-slate-800 text-lg">#{studentData.student.rollNo} (Sem {studentData.student.currentSem})</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 font-bold uppercase">Division & Track</span>
-                    <p className="font-extrabold text-indigo-600 text-lg">{studentData.student.division} | {studentData.student.track}</p>
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 font-bold uppercase">Overall Attendance</span>
-                    <p className={`font-black text-2xl ${studentData.overallPercentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {studentData.overallPercentage}%
-                    </p>
-                  </div>
-                </div>
-
-                {studentData.isShortage && (
-                  <div className="mb-6 p-4 bg-rose-50 border border-rose-300 rounded-xl text-rose-800 flex items-center justify-between">
-                    <span className="font-bold text-sm">⚠️ Defaulter Alert: Attendance is below 75% in the current semester.</span>
-                    <span className="text-xs bg-rose-600 text-white px-3 py-1 rounded font-bold">Action Required</span>
-                  </div>
-                )}
-
-                <h3 className="text-md font-black text-slate-800 uppercase tracking-wide mb-3">Enrolled Subject-Wise Breakdown</h3>
-                <div className="border rounded-xl overflow-hidden">
-                  <table className="w-full text-left border-collapse">
-                    <thead className="bg-slate-100 border-b text-xs font-bold text-slate-600 uppercase">
-                      <tr>
-                        <th className="p-3">Subject Name</th>
-                        <th className="p-3">Category</th>
-                        <th className="p-3 text-center">Conducted</th>
-                        <th className="p-3 text-center">Attended</th>
-                        <th className="p-3 text-right">Percentage</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y text-sm">
-                      {studentData.subjects.map(s => (
-                        <tr key={s.code} className="hover:bg-slate-50">
-                          <td className="p-3 font-semibold text-slate-800">{s.name} ({s.code})</td>
-                          <td className="p-3 text-xs font-bold text-slate-500">{s.type}</td>
-                          <td className="p-3 text-center font-bold text-slate-600">{s.conducted}</td>
-                          <td className="p-3 text-center font-bold text-emerald-600">{s.attended}</td>
-                          <td className={`p-3 text-right font-black ${s.percentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {s.percentage}%
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            {studentError && (
+              <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl">
+                {studentError}
               </div>
+            )}
+
+            {studentData && (
+              <>
+                {/* Metric Summary Cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Cumulative Attendance</span>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className={`text-3xl font-black ${studentData.overallPercentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {studentData.overallPercentage}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-500 ${studentData.overallPercentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`} 
+                        style={{ width: `${Math.min(studentData.overallPercentage, 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Sessions Attended</span>
+                    <p className="text-2xl font-black text-slate-800 mt-1">{studentData.totalAttended}</p>
+                    <span className="text-xs text-slate-400">Total present marks</span>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Total Conducted</span>
+                    <p className="text-2xl font-black text-slate-800 mt-1">{studentData.totalConducted}</p>
+                    <span className="text-xs text-slate-400">Total lectures logged</span>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Batch & Cohort</span>
+                    <p className="text-lg font-black text-indigo-600 mt-1 truncate">{studentData.student.division} • {studentData.student.track}</p>
+                    <span className="text-xs text-slate-400">Semester {studentData.student.currentSem}</span>
+                  </div>
+                </div>
+
+                {/* Enrolled Subjects Performance Grid */}
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide mb-3">Enrolled Subject Breakdown</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {studentData.subjects.map(s => (
+                      <div key={s.code} className="bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <span className="text-[10px] font-black uppercase text-indigo-600 tracking-wider block mb-0.5">{s.code} • {s.type}</span>
+                            <h4 className="font-bold text-sm text-slate-800 leading-snug">{s.name}</h4>
+                          </div>
+                          <span className={`text-base font-black ${s.percentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {s.percentage}%
+                          </span>
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between text-xs text-slate-500 mb-1.5 font-medium">
+                            <span>Attended: <b className="text-slate-800">{s.attended}</b></span>
+                            <span>Conducted: <b className="text-slate-800">{s.conducted}</b></span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full transition-all duration-500 ${s.percentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                              style={{ width: `${Math.min(s.percentage, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -741,7 +774,7 @@ export default function App() {
                 🎉 No defaulters found in Semester {defaulterSem}! All students have 75%+ attendance.
               </div>
             ) : (
-              <div className="border rounded-xl overflow-hidden shadow-sm">
+              <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                 <table className="w-full text-left border-collapse">
                   <thead className="bg-rose-50 border-b text-xs font-bold text-rose-900 uppercase">
                     <tr>

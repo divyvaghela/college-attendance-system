@@ -21,7 +21,8 @@ async function runSeed() {
   await User.insertMany([
     { name: 'Dr. Sharma (Faculty)', email: 'faculty@college.edu', password: hashedPassword, role: 'FACULTY' },
     { name: 'Admin Office', email: 'admin@college.edu', password: hashedPassword, role: 'ADMIN' },
-    { name: 'Aarav Sharma (Student)', email: 'aarav@college.edu', password: hashedPassword, role: 'STUDENT', rollNo: '01' }
+    { name: 'Aarav Sharma (Student)', email: 'aarav@college.edu', password: hashedPassword, role: 'STUDENT', rollNo: '01' },
+    { name: 'Vaghela Divy Dipakbhai', email: 'divyvaghela63@gmail.com', password: hashedPassword, role: 'STUDENT', rollNo: '56' }
   ]);
 
   // 2. Subjects (Sem 1 to 10)
@@ -47,6 +48,7 @@ async function runSeed() {
     { rollNo: '02', name: 'Ananya Patel', currentSem: 7, division: 'Div-1', track: 'AI' },
     { rollNo: '03', name: 'Dev Joshi', currentSem: 7, division: 'Div-1', track: 'IS' },
     { rollNo: '04', name: 'Diya Shah', currentSem: 7, division: 'Div-1', track: 'IS' },
+    { rollNo: '56', name: 'Vaghela Divy Dipakbhai', currentSem: 7, division: 'Div-1', track: 'IS' },
     { rollNo: '61', name: 'Kabir Mehta', currentSem: 7, division: 'Div-2', track: 'AI' },
     { rollNo: '62', name: 'Khushi Desai', currentSem: 7, division: 'Div-2', track: 'AI' },
     { rollNo: '63', name: 'Meet Varma', currentSem: 7, division: 'Div-2', track: 'IS' },
@@ -55,15 +57,16 @@ async function runSeed() {
 
   // 4. Research Project Group
   const projSubj = subjects.find(s => s.subjectCode === 'MSC707_PROJ');
+  const divy = students.find(s => s.rollNo === '56');
   await ProjectGroup.create({
     groupName: 'AI-Security Hybrid Lab Group',
     mentorName: 'Dr. K. Patel',
     subjectId: projSubj._id,
-    studentIds: [students[0]._id, students[1]._id, students[4]._id, students[5]._id]
+    studentIds: [divy._id, students[0]._id, students[1]._id, students[5]._id]
   });
 
   // 5. Timetable Slots
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const todayName = days[new Date().getDay()];
 
   await Timetable.insertMany([
