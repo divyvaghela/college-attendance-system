@@ -16,6 +16,7 @@ const AttendanceSession = require('./models/AttendanceSession');
 const AttendanceRecord = require('./models/AttendanceRecord');
 const User = require('./models/User');
 const Timetable = require('./models/Timetable');
+const LeaveRequest = require('./models/LeaveRequest');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
@@ -77,6 +78,7 @@ app.get('/api/timetable/today', async (req, res) => {
 });
 
 // ---------------- 3. DYNAMIC ROSTER ENGINE ----------------
+// ---------------- 3. DYNAMIC ROSTER ENGINE ----------------
 app.get('/api/attendance/roster', async (req, res) => {
   try {
     const { subjectId, division, groupId } = req.query;
@@ -85,7 +87,10 @@ app.get('/api/attendance/roster', async (req, res) => {
 
     if (subject.subjectType === 'ELECTIVE_GROUP') {
       if (groupId) {
-        const group = await ProjectGroup.findById(groupId).populate('studentIds');
+        const group = await ProjectGroup.findById(groupId).populate({
+          path: 'studentIds',
+          options: { sort: { rollNo: 1 }, collation: { locale: "en", numericOrdering: true } }
+        });
         return res.json({ subject, students: group ? group.studentIds : [] });
       }
       const groups = await ProjectGroup.find({ subjectId: subject._id });
@@ -103,17 +108,20 @@ app.get('/api/attendance/roster', async (req, res) => {
       if (division && division !== 'ALL') query.division = division;
     }
 
-    const students = await Student.find(query).sort({ rollNo: 1 });
+    // MongoDB માં નંબર વાઈઝ પ્રોપર શોર્ટિંગ માટે collation વાપર્યું છે
+    const students = await Student.find(query)
+      .collation({ locale: "en", numericOrdering: true })
+      .sort({ rollNo: 1 });
+      
     res.json({ subject, students });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-
 // ---------------- 4. ATTENDANCE SUBMISSION ----------------
 app.post('/api/attendance/submit', async (req, res) => {
   try {
-    const { subjectId, facultyName, slot, divisionTarget, groupId, records } = req.body;
+    const { subjectId, facultyName, slot, divisionTarget, groupId, sessionDate, topic, description, records } = req.body;
 
     if (!records || records.length === 0) {
       return res.status(400).json({ message: 'No records provided' });
@@ -124,7 +132,10 @@ app.post('/api/attendance/submit', async (req, res) => {
       facultyName: facultyName || 'Faculty',
       slot: slot || 'Standard Lecture',
       divisionTarget: divisionTarget || 'ALL',
-      groupId: groupId || null
+      groupId: groupId || null,
+      sessionDate: sessionDate || new Date(),
+      topic: topic || 'Standard Lecture',
+      description: description || ''
     });
 
     const docs = records.map(r => ({
@@ -154,8 +165,8 @@ app.get('/api/attendance/history', async (req, res) => {
     const sessions = await AttendanceSession.find(query)
       .populate('subjectId', 'name subjectCode subjectType')
       .populate('groupId', 'groupName')
-      .sort({ createdAt: -1 })
-      .limit(30);
+      .sort({ sessionDate: -1, createdAt: -1 })
+      .limit(50);
 
     res.json(sessions);
   } catch (err) {
@@ -166,24 +177,79 @@ app.get('/api/attendance/history', async (req, res) => {
 app.get('/api/attendance/session/:sessionId', async (req, res) => {
   try {
     const records = await AttendanceRecord.find({ sessionId: req.params.sessionId })
-      .populate('studentId', 'rollNo name division track');
+      .populate('studentId', 'rollNo name division track')
+      .sort({ 'studentId.rollNo': 1 });
     res.json(records);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.put('/api/attendance/record/update', async (req, res) => {
+// ---------------- 6. SUPER ADMIN STUDENT CRUD MANAGEMENT ----------------
+// Get students sorted numerically by rollNo for Super Admin
+app.get('/api/students', async (req, res) => {
   try {
-    const { recordId, status } = req.body;
-    await AttendanceRecord.findByIdAndUpdate(recordId, { status });
-    res.json({ message: 'Record updated successfully!' });
+    const { division, track } = req.query;
+    let query = {};
+    if (division && division !== 'ALL') query.division = division;
+    if (track && track !== 'ALL') query.track = track;
+
+    // MongoDB માં rollNo ને નંબર તરીકે શોર્ટ કરવા માટે
+    const students = await Student.find(query).collation({ locale: "en", numericOrdering: true }).sort({ rollNo: 1 });
+    res.json(students);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+// Add a new student & create their student user login
+app.post('/api/students/add', async (req, res) => {
+  try {
+    const { rollNo, name, currentSem, division, track, email } = req.body;
+    const newStudent = new Student(req.body);
+    await newStudent.save();
+
+    const studentEmail = email || `student${rollNo}@college.edu`;
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash('DCSGu', salt);
+
+    await User.findOneAndUpdate(
+      { email: studentEmail.toLowerCase() },
+      {
+        name,
+        email: studentEmail.toLowerCase(),
+        password: hashedPassword,
+        role: 'STUDENT',
+        rollNo
+      },
+      { upsert: true, new: true }
+    );
+
+    res.status(201).json({ message: 'Student and login account added successfully', student: newStudent });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+app.put('/api/students/update/:id', async (req, res) => {
+  try {
+    const updatedStudent = await Student.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!updatedStudent) return res.status(404).json({ message: 'Student not found' });
+    res.json({ message: 'Student updated successfully', student: updatedStudent });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/students/delete/:id', async (req, res) => {
+  try {
+    const deletedStudent = await Student.findByIdAndDelete(req.params.id);
+    if (!deletedStudent) return res.status(404).json({ message: 'Student not found' });
+    res.json({ message: 'Student deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---------------- 6. CSV BULK IMPORT (ADMIN) ----------------
+// ---------------- 7. CSV BULK IMPORT (ADMIN) ----------------
 app.post('/api/students/import-csv', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
 
@@ -194,30 +260,56 @@ app.post('/api/students/import-csv', upload.single('file'), async (req, res) => 
     .on('end', async () => {
       try {
         let inserted = 0;
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash('DCSGu', salt);
+
         for (let row of results) {
-          if (row.rollNo && row.name) {
-            await Student.findOneAndUpdate(
-              { rollNo: row.rollNo.trim() },
+          const rNo = row.rollNo || row['Roll No'] || row['roll no'];
+          const sName = row.name || row['Name'] || row['NAME'];
+          const sem = row.currentSem || row['Current Sem'] || row['current sem'] || 7;
+          const div = row.division || row['Division'] || row['DIV'] || 'Div-1';
+          const trk = row.track || row['Track'] || row['TRACK'] || 'NONE';
+
+          // Create a standard institutional email if not provided (e.g. studentrollno@college.edu)
+          const sEmail = row.email || row['Email'] || `student${rNo}@college.edu`;
+
+          if (rNo && sName) {
+            // 1. Upsert Student Record
+            const studentDoc = await Student.findOneAndUpdate(
+              { rollNo: String(rNo).trim() },
               {
-                name: row.name.trim(),
-                currentSem: Number(row.currentSem) || 1,
-                division: row.division ? row.division.trim() : 'Div-1',
-                track: row.track ? row.track.trim().toUpperCase() : 'NONE'
+                name: String(sName).trim(),
+                currentSem: Number(sem) || 7,
+                division: String(div).trim(),
+                track: String(trk).trim().toUpperCase()
               },
               { upsert: true, new: true }
             );
+
+            // 2. Upsert User Login Record for this student with common password 'DCSGu'
+            await User.findOneAndUpdate(
+              { email: sEmail.toLowerCase().trim() },
+              {
+                name: String(sName).trim(),
+                email: sEmail.toLowerCase().trim(),
+                password: hashedPassword,
+                role: 'STUDENT',
+                rollNo: String(rNo).trim()
+              },
+              { upsert: true, new: true }
+            );
+
             inserted++;
           }
         }
         if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-        res.json({ message: `Successfully imported & updated ${inserted} students!` });
+        res.json({ message: `Successfully imported & updated ${inserted} students with login credentials!` });
       } catch (e) {
         res.status(500).json({ error: e.message });
       }
     });
 });
-
-// ---------------- 7. STUDENT ANALYTICS & DEFAULTERS ----------------
+// ---------------- 8. STUDENT ANALYTICS & DEFAULTERS ----------------
 app.get('/api/attendance/student/:rollNo', async (req, res) => {
   try {
     const student = await Student.findOne({ rollNo: req.params.rollNo });
@@ -300,8 +392,20 @@ app.get('/api/analytics/defaulters', async (req, res) => {
       let totalAttended = 0;
 
       for (const subj of validSubjects) {
-        const conducted = await AttendanceSession.countDocuments({ subjectId: subj._id });
-        const attended = await AttendanceRecord.countDocuments({ subjectId: subj._id, studentId: st._id, status: 'PRESENT' });
+        let conducted = 0;
+        if (subj.subjectType === 'ELECTIVE_GROUP') {
+          const group = await ProjectGroup.findOne({ subjectId: subj._id, studentIds: st._id });
+          if (group) conducted = await AttendanceSession.countDocuments({ subjectId: subj._id, groupId: group._id });
+        } else {
+          conducted = await AttendanceSession.countDocuments({ subjectId: subj._id });
+        }
+
+        const attended = await AttendanceRecord.countDocuments({ 
+          subjectId: subj._id, 
+          studentId: st._id, 
+          status: 'PRESENT' 
+        });
+
         totalConducted += conducted;
         totalAttended += attended;
       }
@@ -326,7 +430,7 @@ app.get('/api/analytics/defaulters', async (req, res) => {
   }
 });
 
-// ---------------- 8. CSV EXPORT ----------------
+// ---------------- 9. CSV EXPORT ----------------
 app.get('/api/attendance/export/csv', async (req, res) => {
   try {
     const { subjectId } = req.query;
@@ -358,6 +462,36 @@ app.get('/api/attendance/export/csv', async (req, res) => {
   }
 });
 
+// ---------------- 10. ERP LEAVE & OD WORKFLOW ----------------
+app.post('/api/leave/apply', async (req, res) => {
+  try {
+    const { studentId, leaveType, fromDate, toDate, reason } = req.body;
+    const leave = await LeaveRequest.create({ studentId, leaveType, fromDate, toDate, reason });
+    res.status(201).json({ message: 'Leave application submitted successfully!', leave });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/leave/all', async (req, res) => {
+  try {
+    const leaves = await LeaveRequest.find().populate('studentId', 'rollNo name division track').sort({ createdAt: -1 });
+    res.json(leaves);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/leave/status', async (req, res) => {
+  try {
+    const { leaveId, status, facultyName } = req.body;
+    const updated = await LeaveRequest.findByIdAndUpdate(leaveId, { status, approvedBy: facultyName }, { new: true });
+    res.json({ message: `Leave status updated to ${status}`, updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/college_attendance_db')
   .then(() => {
@@ -365,3 +499,19 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/college_att
     app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
   })
   .catch(err => console.error('DB Error:', err));
+
+
+
+// Bulk Delete Students
+app.post('/api/students/bulk-delete', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || ids.length === 0) {
+      return res.status(400).json({ message: 'No student IDs provided' });
+    }
+    await Student.deleteMany({ _id: { $in: ids } });
+    res.json({ message: 'Selected students deleted successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});

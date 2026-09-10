@@ -1,26 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { 
   AlertTriangle, Calendar, Clock, BookOpen, Download, 
-  ChevronLeft, ChevronRight, CheckCircle2, XCircle, Users, FileText 
+  ChevronLeft, ChevronRight, CheckCircle2, XCircle, Users, FileText, Printer 
 } from 'lucide-react';
 
 export default function App() {
   // ---------------- AUTH STATE ----------------
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')) || null);
-  const [loginEmail, setLoginEmail] = useState('faculty@college.edu');
-  const [loginPassword, setLoginPassword] = useState('123456');
+  const [loginEmail, setLoginEmail] = useState('student56@college.edu');
+  const [loginPassword, setLoginPassword] = useState('DCSGU');
   const [authError, setAuthError] = useState('');
 
   // Top Nav Tab
-  const [activeTab, setActiveTab] = useState('faculty'); // 'faculty' | 'student' | 'admin'
+  const [activeTab, setActiveTab] = useState('faculty'); // 'faculty' | 'student' | 'admin' | 'leave_portal'
 
-  // ---------------- FACULTY PAGE SUB-VIEWS ----------------
-  // 'main'          : 4 Main Buttons Screen (View Attend, Attend Report, View Subject, Take Att)
-  // 'view_attend'   : Date-wise cards with Time From/To, Download, Take Attend, Pagination < 1 2 3 >
-  // 'view_subject'  : Shows 4 action buttons [Topic] [View Att] [Take Att] [View Report -> 75% filter]
-  // 'take_attend'   : Notebook Page 2 Attendance Register Screen
-  // 'session_modal' : Viewing individual session student records from View Attend cards
-  const [facultySubView, setFacultySubView] = useState('main');
+  // Faculty Workflow State
+  const [facultySubView, setFacultySubView] = useState('main'); // 'main' | 'view_attend' | 'view_subject' | 'take_attend'
 
   // Filter Dropdowns
   const [course, setCourse] = useState('Integrated M.Sc (CS)');
@@ -30,6 +25,11 @@ export default function App() {
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
   const [slot, setSlot] = useState('10:30 AM - 11:30 AM');
   const [todaySchedule, setTodaySchedule] = useState([]);
+
+  // Project Group State
+  const [groups, setGroups] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [isGroupSelectNeeded, setIsGroupSelectNeeded] = useState(false);
 
   // Attendance Register (Take Attend) State
   const [attendDate, setAttendDate] = useState(new Date().toISOString().split('T')[0]);
@@ -54,15 +54,30 @@ export default function App() {
   const [thresholdType, setThresholdType] = useState('less_than');
   const [reportResult, setReportResult] = useState(null);
 
+  // ERP Leave Module State
+  const [leavesList, setLeavesList] = useState([]);
+  const [leaveType, setLeaveType] = useState('MEDICAL');
+  const [leaveFrom, setLeaveFrom] = useState('');
+  const [leaveTo, setLeaveTo] = useState('');
+  const [leaveReason, setLeaveReason] = useState('');
+  const [leaveMsg, setLeaveMsg] = useState('');
+
   // Student Portal State
   const [searchRollNo, setSearchRollNo] = useState(user?.rollNo || '56');
   const [studentData, setStudentData] = useState(null);
   const [studentLoading, setStudentLoading] = useState(false);
   const [studentError, setStudentError] = useState('');
 
-  // Admin CSV State
+  // Admin CSV & CRUD State
   const [csvFile, setCsvFile] = useState(null);
   const [adminMsg, setAdminMsg] = useState('');
+  const [adminDivisionFilter, setAdminDivisionFilter] = useState('ALL');
+  const [adminTrackFilter, setAdminTrackFilter] = useState('ALL');
+  const [adminStudentsList, setAdminStudentsList] = useState([]);
+  const [isEditingStudent, setIsEditingStudent] = useState(null);
+  const [studentForm, setStudentForm] = useState({ rollNo: '', name: '', currentSem: 7, division: 'Div-1', track: 'AI' });
+  const [studentModalOpen, setStudentModalOpen] = useState(false);
+  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
 
   // ---------------- AUTH HANDLERS ----------------
   const handleLogin = async (e) => {
@@ -96,6 +111,7 @@ export default function App() {
 
   const handleLogout = () => {
     setUser(null);
+    setStudentData(null);
     localStorage.clear();
   };
 
@@ -106,8 +122,13 @@ export default function App() {
         .then(res => res.json())
         .then(data => {
           setSubjects(data || []);
-          if (data && data.length > 0) setSelectedSubjectId(data[0]._id);
-          else setSelectedSubjectId('');
+          if (data && data.length > 0) {
+            setSelectedSubjectId(data[0]._id);
+            setSelectedGroupId('');
+            setIsGroupSelectNeeded(false);
+          } else {
+            setSelectedSubjectId('');
+          }
         })
         .catch(err => console.error(err));
 
@@ -126,14 +147,25 @@ export default function App() {
     setLoading(true);
     setSubmitMsg('');
     try {
-      const res = await fetch(`http://localhost:5000/api/attendance/roster?subjectId=${selectedSubjectId}&division=${division}`);
+      let url = `http://localhost:5000/api/attendance/roster?subjectId=${selectedSubjectId}&division=${division}`;
+      if (selectedGroupId) url += `&groupId=${selectedGroupId}`;
+
+      const res = await fetch(url);
       const data = await res.json();
-      const students = data.students || [];
-      setRoster(students);
-      const map = {};
-      students.forEach(st => { map[st._id] = 'PRESENT'; });
-      setAttendanceMap(map);
-      setFacultySubView('take_attend');
+
+      if (data.isGroupSelectNeeded && !selectedGroupId) {
+        setIsGroupSelectNeeded(true);
+        setGroups(data.groups || []);
+        setRoster([]);
+      } else {
+        setIsGroupSelectNeeded(false);
+        const students = data.students || [];
+        setRoster(students);
+        const map = {};
+        students.forEach(st => { map[st._id] = 'PRESENT'; });
+        setAttendanceMap(map);
+        setFacultySubView('take_attend');
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -154,12 +186,11 @@ export default function App() {
     setAttendanceMap(updated);
   };
 
-  // Live Today Attend %
   const totalStudents = roster.length;
   const presentCount = Object.values(attendanceMap).filter(v => v === 'PRESENT').length;
   const todayPercentage = totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0;
 
-  // Submit Final Attendance Session
+  // ---------------- SUBMIT ATTENDANCE ----------------
   const handleSubmitAttendance = async () => {
     setIsSubmitting(true);
     setSubmitMsg('');
@@ -174,6 +205,7 @@ export default function App() {
       topic: finalTopic,
       description,
       divisionTarget: division,
+      groupId: selectedGroupId || null,
       records: roster.map(st => ({
         studentId: st._id,
         status: attendanceMap[st._id]
@@ -188,9 +220,7 @@ export default function App() {
       });
       if (res.ok) {
         setSubmitMsg('Attendance successfully submitted and recorded in database!');
-        setTimeout(() => {
-          setFacultySubView('main');
-        }, 1200);
+        setTimeout(() => setFacultySubView('main'), 1200);
       } else {
         setSubmitMsg('Failed to record attendance');
       }
@@ -201,7 +231,7 @@ export default function App() {
     }
   };
 
-  // ---------------- VIEW ATTEND WORKFLOW (NOTEBOOK SECTION ①) ----------------
+  // ---------------- VIEW ATTEND WORKFLOW ----------------
   const handleOpenViewAttend = async () => {
     try {
       const res = await fetch(`http://localhost:5000/api/attendance/history?semester=${semester}`);
@@ -224,12 +254,7 @@ export default function App() {
     }
   };
 
-  // ---------------- VIEW SUBJECT WORKFLOW (NOTEBOOK SECTION ②) ----------------
-  const handleOpenViewSubject = () => {
-    setSubjectActiveTab('topic');
-    setFacultySubView('view_subject');
-  };
-
+  // ---------------- 75% REPORT ----------------
   const handleGenerate75Report = async () => {
     try {
       const res = await fetch(`http://localhost:5000/api/analytics/defaulters?semester=${semester}`);
@@ -244,13 +269,81 @@ export default function App() {
     }
   };
 
+  // ---------------- ERP LEAVE WORKFLOW ----------------
+  const fetchLeaves = async () => {
+    try {
+      const res = await fetch('http://localhost:5000/api/leave/all');
+      const data = await res.json();
+      setLeavesList(data || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleApplyLeave = async (e) => {
+    e.preventDefault();
+    setLeaveMsg('');
+    try {
+      let stId = studentData?.student?._id;
+
+      if (!stId && user?.rollNo) {
+        const studentRes = await fetch(`http://localhost:5000/api/attendance/student/${user.rollNo}`);
+        const studentJson = await studentRes.json();
+        stId = studentJson?.student?._id;
+      }
+
+      if (!stId) {
+        setLeaveMsg('Error: Student profile not found. Please verify your roll number.');
+        return;
+      }
+
+      const res = await fetch('http://localhost:5000/api/leave/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: stId,
+          leaveType,
+          fromDate: leaveFrom,
+          toDate: leaveTo,
+          reason: leaveReason
+        })
+      });
+
+      if (res.ok) {
+        setLeaveMsg('Leave application filed successfully!');
+        setLeaveReason('');
+        setLeaveFrom('');
+        setLeaveTo('');
+        fetchLeaves();
+      } else {
+        setLeaveMsg('Failed to submit application.');
+      }
+    } catch (err) {
+      setLeaveMsg('Error submitting application');
+    }
+  };
+
+  const updateLeaveStatus = async (leaveId, status) => {
+    try {
+      await fetch('http://localhost:5000/api/leave/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ leaveId, status, facultyName: user.name })
+      });
+      fetchLeaves();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   // ---------------- STUDENT ANALYTICS ----------------
   const fetchStudentAnalytics = async () => {
-    if (!searchRollNo) return;
+    const rollToQuery = searchRollNo || user?.rollNo;
+    if (!rollToQuery) return;
     setStudentLoading(true);
     setStudentError('');
     try {
-      const res = await fetch(`http://localhost:5000/api/attendance/student/${searchRollNo}`);
+      const res = await fetch(`http://localhost:5000/api/attendance/student/${rollToQuery}`);
       const data = await res.json();
       if (res.ok) setStudentData(data);
       else { setStudentError(data.message || 'Error'); setStudentData(null); }
@@ -261,11 +354,102 @@ export default function App() {
     }
   };
 
+  // ---------------- SUPER ADMIN STUDENTS CRUD & BULK DELETE ----------------
+  const fetchAdminStudents = async () => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/students?division=${adminDivisionFilter}&track=${adminTrackFilter}`);
+      const data = await res.json();
+      setAdminStudentsList(data || []);
+      setSelectedStudentIds([]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'student') fetchStudentAnalytics();
-  }, [activeTab]);
+    if (activeTab === 'leave_portal') fetchLeaves();
+    if (activeTab === 'admin') fetchAdminStudents();
+  }, [activeTab, adminDivisionFilter, adminTrackFilter]);
 
-  // Admin CSV Upload
+  const handleSaveStudent = async (e) => {
+    e.preventDefault();
+    try {
+      const url = isEditingStudent 
+        ? `http://localhost:5000/api/students/update/${isEditingStudent._id}`
+        : 'http://localhost:5000/api/students/add';
+      
+      const method = isEditingStudent ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(studentForm)
+      });
+
+      if (res.ok) {
+        setStudentModalOpen(false);
+        setIsEditingStudent(null);
+        setStudentForm({ rollNo: '', name: '', currentSem: 7, division: 'Div-1', track: 'AI' });
+        fetchAdminStudents();
+      } else {
+        alert('Operation failed');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDeleteStudent = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this student?')) return;
+    try {
+      const res = await fetch(`http://localhost:5000/api/students/delete/${id}`, { method: 'DELETE' });
+      if (res.ok) fetchAdminStudents();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleCheckboxChange = (id) => {
+    setSelectedStudentIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = (e) => {
+    if (e.target.checked) {
+      const allIds = adminStudentsList.map(st => st._id);
+      setSelectedStudentIds(allIds);
+    } else {
+      setSelectedStudentIds([]);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedStudentIds.length === 0) {
+      alert('Please select at least one student.');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to delete ${selectedStudentIds.length} selected students?`)) return;
+
+    try {
+      const res = await fetch('http://localhost:5000/api/students/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedStudentIds })
+      });
+
+      if (res.ok) {
+        setSelectedStudentIds([]);
+        fetchAdminStudents();
+      } else {
+        alert('Failed to delete selected students.');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const handleCsvUpload = async (e) => {
     e.preventDefault();
     if (!csvFile) return;
@@ -275,12 +459,18 @@ export default function App() {
       const res = await fetch('http://localhost:5000/api/students/import-csv', { method: 'POST', body: formData });
       const data = await res.json();
       setAdminMsg(data.message || 'Upload complete');
+      fetchAdminStudents();
     } catch (err) {
       setAdminMsg('Upload failed');
     }
   };
 
   const selectedSubjectObj = subjects.find(s => s._id === selectedSubjectId);
+
+  // Filter leaves for student role RBAC
+  const visibleLeaves = user?.role === 'STUDENT' 
+    ? leavesList.filter(l => l.studentId?.rollNo === user.rollNo) 
+    : leavesList;
 
   // =========================================================================
   // LOGIN SCREEN
@@ -330,14 +520,14 @@ export default function App() {
   }
 
   // =========================================================================
-  // MAIN DASHBOARD LAYOUT
+  // MAIN ERP INTERFACE
   // =========================================================================
   return (
     <div className="min-h-screen bg-slate-100 p-3 md:p-6 font-sans">
-      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden print:shadow-none print:m-0 print:p-0 print:max-w-none">
         
-        {/* Top Header */}
-        <div className="bg-slate-900 p-5 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800">
+        {/* Top Navbar */}
+        <div className="bg-slate-900 p-5 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 print:hidden">
           <div>
             <h1 className="text-xl md:text-2xl font-black tracking-tight">Integrated M.Sc (Computer Science)</h1>
             <p className="text-slate-400 text-xs mt-0.5">
@@ -359,12 +549,18 @@ export default function App() {
             >
               Student Portal
             </button>
+            <button 
+              onClick={() => setActiveTab('leave_portal')} 
+              className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'leave_portal' ? 'bg-indigo-600 text-white' : 'text-slate-300'}`}
+            >
+              Leave & OD (ERP)
+            </button>
             {user.role === 'ADMIN' && (
               <button 
                 onClick={() => setActiveTab('admin')} 
                 className={`px-3 py-1.5 rounded-lg transition ${activeTab === 'admin' ? 'bg-indigo-600 text-white' : 'text-slate-300'}`}
               >
-                Admin CSV
+                Super Admin
               </button>
             )}
             <button onClick={handleLogout} className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg ml-2">
@@ -374,16 +570,14 @@ export default function App() {
         </div>
 
         {/* ========================================================================= */}
-        {/* FACULTY PORTAL (EXACT NOTEBOOK WIREFRAME 4-BUTTON ARCHITECTURE)            */}
+        {/* TAB 1: FACULTY PAGE WORKFLOW                                              */}
         {/* ========================================================================= */}
         {activeTab === 'faculty' && (
-          <div className="p-4 md:p-8">
+          <div className="p-4 md:p-8 print:p-0">
 
-            {/* ----------------- SUB-VIEW: MAIN FACULTY PAGE (4 BUTTONS) ----------------- */}
             {facultySubView === 'main' && (
               <div className="space-y-6">
 
-                {/* Today's Scheduled Lectures Banner */}
                 {todaySchedule.length > 0 && (
                   <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-2xl">
                     <span className="text-xs font-black uppercase text-indigo-900 block mb-2.5 tracking-wider">
@@ -412,7 +606,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Top Filter Grid */}
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 grid grid-cols-1 md:grid-cols-4 gap-4 items-end shadow-sm">
                   <div>
                     <label className="block text-xs font-bold text-slate-600 uppercase mb-1.5">Semester (1-10)</label>
@@ -432,7 +625,11 @@ export default function App() {
                     <select
                       className="w-full border rounded-xl p-2.5 bg-white text-sm font-semibold"
                       value={selectedSubjectId}
-                      onChange={e => setSelectedSubjectId(e.target.value)}
+                      onChange={e => {
+                        setSelectedSubjectId(e.target.value);
+                        setSelectedGroupId('');
+                        setIsGroupSelectNeeded(false);
+                      }}
                     >
                       {subjects.map(s => (
                         <option key={s._id} value={s._id}>
@@ -465,19 +662,39 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* THE 2 CARD BOXES CONTAINING 4 BUTTONS (NOTEBOOK SKETCH) */}
+                {isGroupSelectNeeded && (
+                  <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl shadow-sm">
+                    <p className="text-xs font-black uppercase text-amber-900 mb-2">Research Project / 4-Student Group Selection:</p>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <select
+                        className="w-full border rounded-xl p-2.5 bg-white text-sm font-semibold"
+                        value={selectedGroupId}
+                        onChange={e => setSelectedGroupId(e.target.value)}
+                      >
+                        <option value="">-- Choose Assigned Project Group --</option>
+                        {groups.map(g => (
+                          <option key={g._id} value={g._id}>{g.groupName} (Mentor: {g.mentorName})</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={loadRosterForAttendance}
+                        className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap shadow-sm"
+                      >
+                        Load Group
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                  
-                  {/* BOX 1: [View Attend] & [Attend Report (75%)] */}
                   <div className="border border-slate-300 bg-white rounded-2xl p-6 shadow-sm flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded">Card 1</span>
+                      <span className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded">Module A</span>
                       <h3 className="text-lg font-black text-slate-800 mt-2">Attendance & Reports</h3>
-                      <p className="text-xs text-slate-500 mt-1">Date-wise sessions, CSV downloads, and 75% attendance criteria evaluation.</p>
+                      <p className="text-xs text-slate-500 mt-1">Date-wise sessions, CSV downloads, and 75% compliance tracking.</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 mt-6">
-                      {/* Button 1: View Attend */}
                       <button 
                         onClick={handleOpenViewAttend}
                         className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-sm"
@@ -485,10 +702,10 @@ export default function App() {
                         View Attend ➔
                       </button>
 
-                      {/* Button 2: Attend Report */}
                       <button 
                         onClick={() => {
                           setSubjectActiveTab('report_75');
+                          handleGenerate75Report();
                           setFacultySubView('view_subject');
                         }}
                         className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition"
@@ -498,24 +715,24 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* BOX 2: [View Subject] & [Take Att] */}
                   <div className="border border-indigo-200 bg-indigo-50/30 rounded-2xl p-6 shadow-sm flex flex-col justify-between">
                     <div>
-                      <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Card 2</span>
+                      <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-100 px-2 py-1 rounded">Module B</span>
                       <h3 className="text-lg font-black text-slate-800 mt-2">Curriculum & Marking</h3>
-                      <p className="text-xs text-slate-500 mt-1">Subject modules, topic breakdowns, or launch the live attendance register.</p>
+                      <p className="text-xs text-slate-500 mt-1">Module syllabus details, or mark live student attendance register.</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 mt-6">
-                      {/* Button 3: View Subject */}
                       <button 
-                        onClick={handleOpenViewSubject}
+                        onClick={() => {
+                          setSubjectActiveTab('topic');
+                          setFacultySubView('view_subject');
+                        }}
                         className="bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition shadow-sm"
                       >
                         View Subject ➔
                       </button>
 
-                      {/* Button 4: Take Att */}
                       <button 
                         onClick={loadRosterForAttendance}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider shadow-md transition"
@@ -524,24 +741,19 @@ export default function App() {
                       </button>
                     </div>
                   </div>
-
                 </div>
 
               </div>
             )}
 
-            {/* ----------------- SUB-VIEW ①: VIEW ATTEND (DATE-WISE CARDS) ----------------- */}
             {facultySubView === 'view_attend' && (
               <div className="space-y-6">
-                
-                {/* Header with Navigation and Actions */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b pb-4">
                   <div>
                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">View Attendance (Date Wise)</h2>
-                    <p className="text-xs text-slate-500">Filter by selected parameters and examine each logged session</p>
+                    <p className="text-xs text-slate-500">Filter by selected parameters and examine logged sessions</p>
                   </div>
                   
-                  {/* Action Buttons: Download, Take Attend, Go Back */}
                   <div className="flex flex-wrap gap-2">
                     <a 
                       href={`http://localhost:5000/api/attendance/export/csv?subjectId=${selectedSubjectId}`} 
@@ -564,70 +776,55 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Date-wise Cards Grid (From Notebook Wireframe Section ①) */}
                 {historySessions.length === 0 ? (
                   <div className="p-12 text-center border-2 border-dashed rounded-2xl text-slate-400 text-sm font-semibold">
                     No attendance records found for this semester. Click <b>Take Attend</b> to mark the first session!
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {historySessions.slice((attendPage - 1) * 6, attendPage * 6).map(sess => {
-                      const timeFromStr = sess.slot?.split(' - ')[0] || '10:30 AM';
-                      const timeToStr = sess.slot?.split(' - ')[1] || '11:30 AM';
-                      return (
-                        <div key={sess._id} className="border border-slate-200 bg-white hover:border-indigo-400 p-5 rounded-2xl shadow-sm flex flex-col justify-between transition">
-                          <div>
-                            <div className="flex justify-between items-start mb-2">
-                              <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
-                                {sess.subjectId?.subjectCode || 'LEC'}
-                              </span>
-                              <span className="text-[11px] font-bold text-slate-400">{sess.divisionTarget || 'All Div'}</span>
-                            </div>
-
-                            <h4 className="font-bold text-slate-800 text-sm leading-snug mb-3">
-                              {sess.subjectId?.name || 'Class Lecture'}
-                            </h4>
-
-                            {/* Card Details: Date, Time From, Time To */}
-                            <div className="space-y-1 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl">
-                              <div className="flex justify-between">
-                                <span className="font-bold text-slate-400">Date:</span>
-                                <span className="font-extrabold text-slate-700">{new Date(sess.sessionDate).toLocaleDateString()}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="font-bold text-slate-400">Time From:</span>
-                                <span className="font-bold text-slate-700">{timeFromStr}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="font-bold text-slate-400">Time To:</span>
-                                <span className="font-bold text-slate-700">{timeToStr}</span>
-                              </div>
-                              <div className="flex justify-between pt-1 border-t">
-                                <span className="font-bold text-slate-400">Faculty:</span>
-                                <span className="font-bold text-slate-700 truncate">{sess.facultyName}</span>
-                              </div>
-                            </div>
+                    {historySessions.slice((attendPage - 1) * 6, attendPage * 6).map(sess => (
+                      <div key={sess._id} className="border border-slate-200 bg-white hover:border-indigo-400 p-5 rounded-2xl shadow-sm flex flex-col justify-between transition">
+                        <div>
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
+                              {sess.subjectId?.subjectCode || 'LEC'}
+                            </span>
+                            <span className="text-[11px] font-bold text-slate-400">{sess.divisionTarget || 'All Div'}</span>
                           </div>
 
-                          {/* View Button */}
-                          <button 
-                            onClick={() => handleOpenSessionModal(sess._id)}
-                            className="mt-4 w-full bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition"
-                          >
-                            View Details ➔
-                          </button>
+                          <h4 className="font-bold text-slate-800 text-sm leading-snug mb-3">
+                            {sess.subjectId?.name || 'Class Lecture'}
+                          </h4>
+
+                          <div className="space-y-1 text-xs text-slate-600 bg-slate-50 p-3 rounded-xl">
+                            <div className="flex justify-between">
+                              <span className="font-bold text-slate-400">Date:</span>
+                              <span className="font-extrabold text-slate-700">{new Date(sess.sessionDate).toLocaleDateString()}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="font-bold text-slate-400">Time:</span>
+                              <span className="font-bold text-slate-700">{sess.slot}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="font-bold text-slate-400">Topic:</span>
+                              <span className="font-bold text-indigo-700 truncate">{sess.topic || 'Regular Lecture'}</span>
+                            </div>
+                          </div>
                         </div>
-                      );
-                    })}
+
+                        <button 
+                          onClick={() => handleOpenSessionModal(sess._id)}
+                          className="mt-4 w-full bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition"
+                        >
+                          View Details ➔
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
 
-                {/* Pagination Controls (< 1 2 3 > from Notebook Wireframe) */}
                 <div className="flex justify-between items-center pt-2">
-                  <span className="text-xs text-slate-500 font-bold">
-                    Total Sessions Conducted: {historySessions.length}
-                  </span>
-                  
+                  <span className="text-xs text-slate-500 font-bold">Total Sessions: {historySessions.length}</span>
                   <div className="flex items-center gap-1.5">
                     <button 
                       disabled={attendPage === 1}
@@ -636,7 +833,6 @@ export default function App() {
                     >
                       <ChevronLeft className="h-4 w-4" />
                     </button>
-
                     {[...Array(Math.ceil(historySessions.length / 6) || 1)].map((_, i) => (
                       <button
                         key={i + 1}
@@ -648,7 +844,6 @@ export default function App() {
                         {i + 1}
                       </button>
                     ))}
-
                     <button 
                       disabled={attendPage * 6 >= historySessions.length}
                       onClick={() => setAttendPage(p => p + 1)}
@@ -659,7 +854,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Session Details Modal */}
                 {activeSessionRecords && (
                   <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
                     <div className="bg-white rounded-2xl max-w-lg w-full p-6 max-h-[85vh] flex flex-col shadow-2xl">
@@ -687,12 +881,9 @@ export default function App() {
               </div>
             )}
 
-            {/* ----------------- SUB-VIEW ②: VIEW SUBJECT (4 ACTIONS: TOPIC, VIEW ATT, TAKE ATT, VIEW REPORT) ----------------- */}
             {facultySubView === 'view_subject' && (
               <div className="space-y-6">
-                
-                {/* Header */}
-                <div className="flex justify-between items-center border-b pb-4">
+                <div className="flex justify-between items-center border-b pb-4 print:hidden">
                   <div>
                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">
                       Subject Overview: {selectedSubjectObj?.name || 'Selected Subject'}
@@ -707,8 +898,7 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* 4 SUB-BUTTONS (EXACTLY FROM NOTEBOOK SECTION ②) */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 print:hidden">
                   <button
                     onClick={() => setSubjectActiveTab('topic')}
                     className={`p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border ${
@@ -717,21 +907,18 @@ export default function App() {
                   >
                     Topic
                   </button>
-
                   <button
                     onClick={handleOpenViewAttend}
                     className="p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                   >
                     View Att
                   </button>
-
                   <button
                     onClick={loadRosterForAttendance}
                     className="p-3 rounded-xl text-xs font-bold uppercase tracking-wider transition border bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                   >
                     Take Att
                   </button>
-
                   <button
                     onClick={() => {
                       setSubjectActiveTab('report_75');
@@ -745,16 +932,15 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Content based on sub-button */}
                 {subjectActiveTab === 'topic' && (
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4 print:hidden">
                     <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider">Curriculum Module Topics</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {[
-                        'Unit 1: Fundamentals and Theoretical Architecture',
+                        'Unit 1: Fundamentals & Theoretical Architecture',
                         'Unit 2: Framework Implementation & Pipeline Design',
                         'Unit 3: Security Vectors, Testing & Validation',
-                        'Unit 4: Advanced Real-Time Case Studies & Lab Evaluations'
+                        'Unit 4: Real-Time Case Studies & Lab Evaluation'
                       ].map((t, idx) => (
                         <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 font-bold text-xs text-slate-700 flex items-center gap-3">
                           <span className="h-6 w-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs font-black">{idx + 1}</span>
@@ -766,11 +952,11 @@ export default function App() {
                 )}
 
                 {subjectActiveTab === 'report_75' && (
-                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-4 print:bg-white print:border-none print:p-0">
+                    <div className="flex flex-wrap items-center justify-between gap-4 print:hidden">
                       <div>
                         <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider">75% Attendance Compliance Check</h3>
-                        <p className="text-xs text-slate-400">Exam eligibility check based on 75% minimum threshold</p>
+                        <p className="text-xs text-slate-400">Semester examination eligibility check</p>
                       </div>
 
                       <div className="flex items-center gap-3">
@@ -789,14 +975,26 @@ export default function App() {
                         >
                           Generate Report
                         </button>
+
+                        <button 
+                          onClick={() => window.print()}
+                          className="flex items-center gap-1.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold px-4 py-2 rounded-xl transition shadow-sm"
+                        >
+                          <Printer className="h-3.5 w-3.5" /> Print Official Notice
+                        </button>
                       </div>
                     </div>
 
-                    {/* Defaulter / Eligible Table */}
+                    <div className="hidden print:block text-center border-b pb-4 mb-4">
+                      <h2 className="text-xl font-black uppercase tracking-tight text-slate-900">DEPARTMENT OF COMPUTER SCIENCE</h2>
+                      <p className="text-xs text-slate-600 font-bold">INTEGRATED M.SC ATTENDANCE SHORTAGE COMPLIANCE NOTICE</p>
+                      <p className="text-[10px] text-slate-500">Criteria: Below 75% Minimum Mandatory Term Attendance</p>
+                    </div>
+
                     {reportResult && (
-                      <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm mt-4">
+                      <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm mt-4 print:border print:border-black">
                         <table className="w-full text-left border-collapse text-xs">
-                          <thead className="bg-slate-100 border-b text-slate-600 font-bold uppercase">
+                          <thead className="bg-slate-100 border-b text-slate-600 font-bold uppercase print:bg-slate-200">
                             <tr>
                               <th className="p-3">Roll No</th>
                               <th className="p-3">Student Name</th>
@@ -835,11 +1033,8 @@ export default function App() {
               </div>
             )}
 
-            {/* ----------------- SUB-VIEW: TAKE ATTENDANCE (PAGE 2 NOTEBOOK) ----------------- */}
             {facultySubView === 'take_attend' && (
               <div className="max-w-5xl mx-auto space-y-6">
-                
-                {/* Header with Go Back */}
                 <div className="flex justify-between items-center border-b pb-4">
                   <div>
                     <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">Take Attendance</h2>
@@ -853,7 +1048,6 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* Selected Options Card (Top Wireframe Card from Page 2) */}
                 <div className="bg-slate-900 text-white p-5 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-4 text-xs shadow-lg">
                   <div>
                     <span className="text-slate-400 block uppercase text-[10px] font-bold">Course & Semester</span>
@@ -875,7 +1069,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Date, Time Slot & Lecture Details */}
                 <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Select Date</label>
@@ -905,7 +1098,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Topic Dropdown with 'Other' dynamic input */}
                   <div>
                     <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Topic</label>
                     <select 
@@ -941,7 +1133,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Today Attend Percentage Gauge */}
                 <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div>
                     <span className="text-xs font-black uppercase text-indigo-900 block">Today Attend Percentage</span>
@@ -964,7 +1155,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Student Roster Table */}
                 <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
                   <table className="w-full text-left border-collapse">
                     <thead className="bg-slate-100 border-b text-xs font-bold text-slate-600 uppercase">
@@ -977,39 +1167,31 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y text-sm">
-                      {roster.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="p-6 text-center text-slate-400 font-medium">
-                            No students enrolled in this semester/track combination.
-                          </td>
-                        </tr>
-                      ) : (
-                        roster.map(st => {
-                          const isPresent = attendanceMap[st._id] === 'PRESENT';
-                          return (
-                            <tr key={st._id} className="hover:bg-slate-50 transition">
-                              <td className="p-3.5 font-bold text-slate-800">#{st.rollNo}</td>
-                              <td className="p-3.5 font-semibold text-slate-700">{st.name}</td>
-                              <td className="p-3.5">
-                                <span className="text-xs px-2.5 py-0.5 rounded-md font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                  {st.track}
-                                </span>
-                              </td>
-                              <td className="p-3.5 text-slate-500 text-xs font-bold">{st.division}</td>
-                              <td className="p-3.5 text-center">
-                                <button 
-                                  onClick={() => toggleStatus(st._id)} 
-                                  className={`px-5 py-1.5 rounded-full text-xs font-extrabold transition shadow-sm ${
-                                    isPresent ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-rose-600 text-white hover:bg-rose-700'
-                                  }`}
-                                >
-                                  {isPresent ? 'PRESENT' : 'ABSENT'}
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
+                      {roster.map(st => {
+                        const isPresent = attendanceMap[st._id] === 'PRESENT';
+                        return (
+                          <tr key={st._id} className="hover:bg-slate-50 transition">
+                            <td className="p-3.5 font-bold text-slate-800">#{st.rollNo}</td>
+                            <td className="p-3.5 font-semibold text-slate-700">{st.name}</td>
+                            <td className="p-3.5">
+                              <span className="text-xs px-2.5 py-0.5 rounded-md font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                {st.track}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-slate-500 text-xs font-bold">{st.division}</td>
+                            <td className="p-3.5 text-center">
+                              <button 
+                                onClick={() => toggleStatus(st._id)} 
+                                className={`px-5 py-1.5 rounded-full text-xs font-extrabold transition shadow-sm ${
+                                  isPresent ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-rose-600 text-white hover:bg-rose-700'
+                                }`}
+                              >
+                                {isPresent ? 'PRESENT' : 'ABSENT'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1020,7 +1202,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Final Submit Button */}
                 <div className="flex justify-end pt-2">
                   <button 
                     disabled={isSubmitting || roster.length === 0} 
@@ -1037,138 +1218,489 @@ export default function App() {
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* STUDENT PORTAL (METRICS, ATTENDANCE CHECKER & PROGRESS BARS)               */}
-        {/* ========================================================================= */}
-        {activeTab === 'student' && (
-          <div className="p-4 md:p-8 space-y-6 bg-slate-50/60 min-h-[500px]">
-            {studentData && studentData.isShortage && (
-              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3 text-rose-900 shadow-sm">
-                <AlertTriangle className="h-5 w-5 text-rose-600 flex-shrink-0" />
-                <div className="text-xs md:text-sm">
-                  <span className="font-extrabold block">Attendance Shortage Alert (&lt; 75%)</span>
-                  Your total attendance is currently at {studentData.overallPercentage}%. Academic compliance requires at least 75% to appear in semester examinations.
+{/* ========================================================================= */}
+{/* TAB 2: STUDENT PORTAL (WITH VISUAL ANALYTICS & DASHBOARD GRAPHS)          */}
+{/* ========================================================================= */}
+{activeTab === 'student' && (
+  <div className="p-4 md:p-8 space-y-6 bg-slate-50/60 min-h-[500px]">
+    
+    {/* Shortage Warning Banner */}
+    {studentData && studentData.isShortage && (
+      <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-center gap-3 text-rose-900 shadow-sm animate-pulse">
+        <AlertTriangle className="h-6 w-6 text-rose-600 flex-shrink-0" />
+        <div className="text-xs md:text-sm">
+          <span className="font-extrabold block">Attendance Shortage Alert (&lt; 75%)</span>
+          Your total cumulative attendance is currently at <b className="underline">{studentData.overallPercentage}%</b>. University compliance requires a minimum of 75% to be eligible for semester examinations.
+        </div>
+      </div>
+    )}
+
+    {/* Top Bar / Search for Admin/Faculty checking student, or Student self view */}
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="text-xs font-bold text-slate-500 uppercase">
+        Student Portal: <b className="text-indigo-600 text-sm">#{studentData?.student?.rollNo || user?.rollNo || searchRollNo} - {studentData?.student?.name || user?.name}</b>
+      </div>
+      
+      {user.role !== 'STUDENT' && (
+        <div className="flex gap-2 w-full sm:w-auto">
+          <input
+            type="text"
+            value={searchRollNo}
+            onChange={e => setSearchRollNo(e.target.value)}
+            placeholder="Enter Roll No..."
+            className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold w-36 focus:outline-indigo-600"
+          />
+          <button 
+            onClick={fetchStudentAnalytics} 
+            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg transition"
+          >
+            {studentLoading ? 'Loading...' : 'Search RollNo'}
+          </button>
+        </div>
+      )}
+    </div>
+
+    {studentError && (
+      <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl">
+        {studentError}
+      </div>
+    )}
+
+    {studentData && (
+      <>
+        {/* High-Level Analytics Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col justify-between">
+            <div>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Overall Attendance</span>
+              <p className={`text-3xl font-black mt-1 ${studentData.overallPercentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                {studentData.overallPercentage}%
+              </p>
+            </div>
+            <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-500 ${studentData.overallPercentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`} 
+                style={{ width: `${Math.min(studentData.overallPercentage, 100)}%` }} 
+              />
+            </div>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Lectures Attended</span>
+            <p className="text-2xl font-black text-slate-800 mt-1">{studentData.totalAttended} <span className="text-xs font-normal text-slate-400">sessions</span></p>
+            <span className="text-xs text-emerald-600 font-bold mt-2 block">✔ Present marks recorded</span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Total Conducted</span>
+            <p className="text-2xl font-black text-slate-800 mt-1">{studentData.totalConducted} <span className="text-xs font-normal text-slate-400">sessions</span></p>
+            <span className="text-xs text-slate-400 font-medium mt-2 block">Total faculty lectures logged</span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Academic Division</span>
+            <p className="text-lg font-black text-indigo-600 mt-1 truncate">{studentData.student.division} • {studentData.student.track}</p>
+            <span className="text-xs text-slate-400 font-medium mt-2 block">Semester {studentData.student.currentSem} (CS)</span>
+          </div>
+        </div>
+
+        {/* Visual Analytics & Subject Progress Bars */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+          <div className="flex justify-between items-center border-b pb-3">
+            <div>
+              <h3 className="text-sm font-black uppercase text-slate-800 tracking-wider">Subject-Wise Analytics & Performance Graph</h3>
+              <p className="text-xs text-slate-400">Detailed breakdown across all enrolled theoretical and practical modules</p>
+            </div>
+            <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1 rounded-xl">
+              Target: 75% Minimum
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            {studentData.subjects.map(s => (
+              <div key={s.code} className="bg-slate-50/80 p-4 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-indigo-600 tracking-wider">{s.code} • {s.type}</span>
+                    <h4 className="font-bold text-sm text-slate-800">{s.name}</h4>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-slate-500 font-semibold">
+                      Attended: <b className="text-slate-800">{s.attended}</b> / Conducted: <b className="text-slate-800">{s.conducted}</b>
+                    </span>
+                    <span className={`text-sm font-black px-2.5 py-0.5 rounded-lg ${s.percentage >= 75 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                      {s.percentage}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Custom Animated Progress Bar / Visual Graph */}
+                <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden p-0.5">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-700 ${s.percentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`} 
+                    style={{ width: `${Math.min(s.percentage, 100)}%` }} 
+                  />
                 </div>
               </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-              <div className="text-xs font-bold text-slate-500 uppercase">
-                Active Student: <b className="text-indigo-600 text-sm">#{studentData?.student?.rollNo || searchRollNo} - {studentData?.student?.name || user.name}</b>
-              </div>
-              <div className="flex gap-2 w-full sm:w-auto">
-                <input
-                  type="text"
-                  value={searchRollNo}
-                  onChange={e => setSearchRollNo(e.target.value)}
-                  placeholder="Roll No (e.g. 56)"
-                  className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold w-32 focus:outline-indigo-600"
-                />
-                <button 
-                  onClick={fetchStudentAnalytics} 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-1.5 rounded-lg transition"
-                >
-                  {studentLoading ? 'Loading...' : 'Check'}
-                </button>
-              </div>
+            ))}
+          </div>
+        </div>
+      </>
+    )}
+  </div>
+)}
+        {/* ========================================================================= */}
+        {/* TAB 3: ERP LEAVE & ON-DUTY (OD) WORKFLOW PORTAL                           */}
+        {/* ========================================================================= */}
+        {activeTab === 'leave_portal' && (
+          <div className="p-4 md:p-8 space-y-6">
+            <div className="border-b pb-4">
+              <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">ERP Leave & Duty Exemption Portal</h2>
+              <p className="text-xs text-slate-500">Apply for Medical/Duty leaves and manage HOD/Faculty approvals</p>
             </div>
 
-            {studentError && (
-              <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl">
-                {studentError}
-              </div>
-            )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {user.role === 'STUDENT' && (
+                <div className="bg-slate-50 border border-slate-200 p-5 rounded-2xl">
+                  <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider mb-4">Submit Exemption Request</h3>
+                  <form onSubmit={handleApplyLeave} className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Leave Type</label>
+                      <select 
+                        value={leaveType} 
+                        onChange={e => setLeaveType(e.target.value)} 
+                        className="w-full border rounded-xl p-2 bg-white text-xs font-bold"
+                      >
+                        <option value="MEDICAL">Medical Exemption</option>
+                        <option value="ON_DUTY_EVENT">On Duty (Hackathon/Event)</option>
+                        <option value="SPORTS">Sports Championship</option>
+                        <option value="PERSONAL">Personal / Emergency</option>
+                      </select>
+                    </div>
 
-            {studentData && (
-              <>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Cumulative Attendance</span>
-                    <p className={`text-3xl font-black mt-1 ${studentData.overallPercentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {studentData.overallPercentage}%
-                    </p>
-                    <div className="w-full bg-slate-100 h-2 rounded-full mt-3 overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 ${studentData.overallPercentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`} 
-                        style={{ width: `${Math.min(studentData.overallPercentage, 100)}%` }} 
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">From Date</label>
+                      <input 
+                        type="date" 
+                        value={leaveFrom} 
+                        onChange={e => setLeaveFrom(e.target.value)} 
+                        className="w-full border rounded-xl p-2 bg-white text-xs font-semibold" 
+                        required 
                       />
                     </div>
-                  </div>
 
-                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Sessions Attended</span>
-                    <p className="text-2xl font-black text-slate-800 mt-1">{studentData.totalAttended}</p>
-                    <span className="text-xs text-slate-400">Total present marks</span>
-                  </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">To Date</label>
+                      <input 
+                        type="date" 
+                        value={leaveTo} 
+                        onChange={e => setLeaveTo(e.target.value)} 
+                        className="w-full border rounded-xl p-2 bg-white text-xs font-semibold" 
+                        required 
+                      />
+                    </div>
 
-                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Total Conducted</span>
-                    <p className="text-2xl font-black text-slate-800 mt-1">{studentData.totalConducted}</p>
-                    <span className="text-xs text-slate-400">Total lectures logged</span>
-                  </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Reason / Document Note</label>
+                      <textarea 
+                        value={leaveReason} 
+                        onChange={e => setLeaveReason(e.target.value)} 
+                        placeholder="Specify event name or medical cause..." 
+                        className="w-full border rounded-xl p-2 bg-white text-xs" 
+                        rows={3} 
+                        required 
+                      />
+                    </div>
 
-                  <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">Batch & Cohort</span>
-                    <p className="text-lg font-black text-indigo-600 mt-1 truncate">{studentData.student.division} • {studentData.student.track}</p>
-                    <span className="text-xs text-slate-400">Semester {studentData.student.currentSem}</span>
-                  </div>
+                    <button className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-xl text-xs uppercase tracking-wider transition">
+                      File Application
+                    </button>
+                    {leaveMsg && (
+                      <p className={`text-xs text-center font-bold mt-2 ${leaveMsg.includes('successfully') ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {leaveMsg}
+                      </p>
+                    )}
+                  </form>
                 </div>
+              )}
 
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide mb-3">Enrolled Subject Breakdown</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {studentData.subjects.map(s => (
-                      <div key={s.code} className="bg-white border border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all rounded-2xl p-5 shadow-sm flex flex-col justify-between">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <span className="text-[10px] font-black uppercase text-indigo-600 tracking-wider block mb-0.5">{s.code} • {s.type}</span>
-                            <h4 className="font-bold text-sm text-slate-800 leading-snug">{s.name}</h4>
-                          </div>
-                          <span className={`text-base font-black ${s.percentage >= 75 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {s.percentage}%
-                          </span>
-                        </div>
-
-                        <div>
-                          <div className="flex justify-between text-xs text-slate-500 mb-1.5 font-medium">
-                            <span>Attended: <b className="text-slate-800">{s.attended}</b></span>
-                            <span>Conducted: <b className="text-slate-800">{s.conducted}</b></span>
-                          </div>
-                          <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full transition-all duration-500 ${s.percentage >= 75 ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                              style={{ width: `${Math.min(s.percentage, 100)}%` }} 
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              <div className={`${user.role === 'STUDENT' ? 'md:col-span-2' : 'md:col-span-3'} space-y-3`}>
+                <h3 className="text-xs font-black uppercase text-slate-700 tracking-wider">
+                  {user.role === 'STUDENT' ? 'My Leave Applications' : 'All Departmental Leave & OD Requests'}
+                </h3>
+                <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="bg-slate-100 border-b text-slate-600 font-bold uppercase">
+                      <tr>
+                        <th className="p-3">Student</th>
+                        <th className="p-3">Type</th>
+                        <th className="p-3">Duration</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3 text-center">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {visibleLeaves.length === 0 ? (
+                        <tr><td colSpan={5} className="p-6 text-center text-slate-400">No leave requests logged yet.</td></tr>
+                      ) : (
+                        visibleLeaves.map(l => (
+                          <tr key={l._id} className="hover:bg-slate-50">
+                            <td className="p-3">
+                              <span className="font-bold block">#{l.studentId?.rollNo} - {l.studentId?.name}</span>
+                              <span className="text-[10px] text-slate-400">{l.reason}</span>
+                            </td>
+                            <td className="p-3 font-bold text-indigo-700">{l.leaveType}</td>
+                            <td className="p-3">{new Date(l.fromDate).toLocaleDateString()} - {new Date(l.toDate).toLocaleDateString()}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                                l.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
+                                l.status === 'REJECTED' ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                              }`}>
+                                {l.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center">
+                              {l.status === 'PENDING' && (user.role === 'FACULTY' || user.role === 'ADMIN') ? (
+                                <div className="flex gap-1 justify-center">
+                                  <button onClick={() => updateLeaveStatus(l._id, 'APPROVED')} className="bg-emerald-600 text-white px-2 py-1 rounded text-[10px] font-bold">Approve</button>
+                                  <button onClick={() => updateLeaveStatus(l._id, 'REJECTED')} className="bg-rose-600 text-white px-2 py-1 rounded text-[10px] font-bold">Reject</button>
+                                </div>
+                              ) : (
+                                <span className="text-slate-400 text-[10px] font-medium">{l.approvedBy ? `by ${l.approvedBy}` : 'Completed'}</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              </>
-            )}
+              </div>
+            </div>
           </div>
         )}
 
         {/* ========================================================================= */}
-        {/* ADMIN PORTAL (CSV BULK IMPORT)                                            */}
+        {/* TAB 4: SUPER ADMIN CRUD, SELECT ALL & BULK DELETE                         */}
         {/* ========================================================================= */}
         {activeTab === 'admin' && (
-          <div className="p-6 md:p-8 max-w-lg mx-auto">
-            <h2 className="text-lg font-black text-slate-800 uppercase mb-2">Student Bulk CSV Import</h2>
-            <p className="text-xs text-slate-500 mb-6">Upload CSV file with columns: <b>rollNo, name, currentSem, division, track</b></p>
-            <form onSubmit={handleCsvUpload} className="space-y-4 bg-slate-50 p-6 rounded-xl border">
-              <input
-                type="file"
-                accept=".csv"
-                onChange={e => setCsvFile(e.target.files[0])}
-                className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700"
-              />
-              <button className="w-full bg-slate-900 hover:bg-black text-white font-bold py-2 rounded-lg text-sm">
-                Upload & Sync Students
-              </button>
-            </form>
-            {adminMsg && <p className="mt-4 p-3 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold text-center">{adminMsg}</p>}
+          <div className="p-4 md:p-8 space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b pb-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-800 uppercase tracking-wide">Super Admin: Student Management</h2>
+                <p className="text-xs text-slate-500">Complete CRUD operations with dynamic division, track filtering & bulk deletion</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {selectedStudentIds.length > 0 && (
+                  <button 
+                    onClick={handleBulkDelete}
+                    className="bg-rose-700 hover:bg-rose-800 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-sm"
+                  >
+                    Delete Selected ({selectedStudentIds.length})
+                  </button>
+                )}
+                <button 
+                  onClick={() => {
+                    setIsEditingStudent(null);
+                    setStudentForm({ rollNo: '', name: '', currentSem: 7, division: 'Div-1', track: 'AI' });
+                    setStudentModalOpen(true);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2 rounded-xl text-xs transition shadow-sm"
+                >
+                  + Add New Student
+                </button>
+              </div>
+            </div>
+
+            {/* Filters */}
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl flex flex-wrap gap-4 items-center">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Division Filter</label>
+                <select 
+                  value={adminDivisionFilter} 
+                  onChange={e => setAdminDivisionFilter(e.target.value)}
+                  className="border rounded-xl p-2 bg-white text-xs font-bold"
+                >
+                  <option value="ALL">All Divisions</option>
+                  <option value="Div-1">Division 1</option>
+                  <option value="Div-2">Division 2</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Track Filter</label>
+                <select 
+                  value={adminTrackFilter} 
+                  onChange={e => setAdminTrackFilter(e.target.value)}
+                  className="border rounded-xl p-2 bg-white text-xs font-bold"
+                >
+                  <option value="ALL">All Tracks</option>
+                  <option value="AI">AI Track</option>
+                  <option value="IS">IS Track</option>
+                  <option value="NONE">None</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Students Table with Checkboxes */}
+            <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-slate-100 border-b text-slate-600 font-bold uppercase">
+                  <tr>
+                    <th className="p-3.5 w-10 text-center">
+                      <input 
+                        type="checkbox" 
+                        onChange={handleSelectAll}
+                        checked={adminStudentsList.length > 0 && selectedStudentIds.length === adminStudentsList.length}
+                        className="rounded cursor-pointer"
+                      />
+                    </th>
+                    <th className="p-3.5">Roll No</th>
+                    <th className="p-3.5">Name</th>
+                    <th className="p-3.5">Sem</th>
+                    <th className="p-3.5">Division</th>
+                    <th className="p-3.5">Track</th>
+                    <th className="p-3.5 text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {adminStudentsList.length === 0 ? (
+                    <tr><td colSpan={7} className="p-8 text-center text-slate-400 font-medium">No students found matching filters.</td></tr>
+                  ) : (
+                    adminStudentsList.map(st => (
+                      <tr key={st._id} className="hover:bg-slate-50">
+                        <td className="p-3.5 text-center">
+                          <input 
+                            type="checkbox" 
+                            checked={selectedStudentIds.includes(st._id)}
+                            onChange={() => handleCheckboxChange(st._id)}
+                            className="rounded cursor-pointer"
+                          />
+                        </td>
+                        <td className="p-3.5 font-bold">#{st.rollNo}</td>
+                        <td className="p-3.5 font-semibold text-slate-800">{st.name}</td>
+                        <td className="p-3.5">{st.currentSem}</td>
+                        <td className="p-3.5 text-slate-500">{st.division}</td>
+                        <td className="p-3.5 font-bold text-indigo-600">{st.track}</td>
+                        <td className="p-3.5 text-center flex justify-center gap-2">
+                          <button 
+                            onClick={() => {
+                              setIsEditingStudent(st);
+                              setStudentForm({ rollNo: st.rollNo, name: st.name, currentSem: st.currentSem, division: st.division, track: st.track });
+                              setStudentModalOpen(true);
+                            }}
+                            className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1 rounded-lg font-bold text-[10px]"
+                          >
+                            Edit
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteStudent(st._id)}
+                            className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded-lg font-bold text-[10px]"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* CSV Bulk Import Section */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-6 max-w-lg">
+              <h3 className="text-xs font-black uppercase text-slate-800 mb-1">Student Bulk CSV Import</h3>
+              <p className="text-xs text-slate-500 mb-4">Upload CSV file with columns: <b>rollNo, name, currentSem, division, track</b></p>
+              <form onSubmit={handleCsvUpload} className="space-y-3">
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={e => setCsvFile(e.target.files[0])}
+                  className="w-full text-xs file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700"
+                />
+                <button className="w-full bg-slate-900 hover:bg-black text-white font-bold py-2 rounded-xl text-xs">
+                  Upload & Sync Students
+                </button>
+              </form>
+              {adminMsg && <p className="mt-3 p-2 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold text-center">{adminMsg}</p>}
+            </div>
+
+            {/* Add/Edit Modal */}
+            {studentModalOpen && (
+              <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex justify-between items-center border-b pb-3">
+                    <h3 className="font-black text-slate-800 text-sm uppercase">
+                      {isEditingStudent ? 'Edit Student Details' : 'Add New Student'}
+                    </h3>
+                    <button onClick={() => setStudentModalOpen(false)} className="text-slate-400 hover:text-slate-700 font-black text-lg">✕</button>
+                  </div>
+
+                  <form onSubmit={handleSaveStudent} className="space-y-3 text-xs">
+                    <div>
+                      <label className="block font-bold text-slate-600 uppercase mb-1">Roll No</label>
+                      <input 
+                        type="text" 
+                        value={studentForm.rollNo} 
+                        onChange={e => setStudentForm({...studentForm, rollNo: e.target.value})} 
+                        className="w-full border rounded-xl p-2.5 font-bold" 
+                        required 
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-600 uppercase mb-1">Full Name</label>
+                      <input 
+                        type="text" 
+                        value={studentForm.name} 
+                        onChange={e => setStudentForm({...studentForm, name: e.target.value})} 
+                        className="w-full border rounded-xl p-2.5 font-bold" 
+                        required 
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-bold text-slate-600 uppercase mb-1">Division</label>
+                        <select 
+                          value={studentForm.division} 
+                          onChange={e => setStudentForm({...studentForm, division: e.target.value})}
+                          className="w-full border rounded-xl p-2.5 bg-white font-bold"
+                        >
+                          <option value="Div-1">Div-1</option>
+                          <option value="Div-2">Div-2</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block font-bold text-slate-600 uppercase mb-1">Track</label>
+                        <select 
+                          value={studentForm.track} 
+                          onChange={e => setStudentForm({...studentForm, track: e.target.value})}
+                          className="w-full border rounded-xl p-2.5 bg-white font-bold"
+                        >
+                          <option value="AI">AI</option>
+                          <option value="IS">IS</option>
+                          <option value="NONE">NONE</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="pt-3 flex justify-end gap-2">
+                      <button 
+                        type="button" 
+                        onClick={() => setStudentModalOpen(false)}
+                        className="px-4 py-2 border rounded-xl font-bold text-slate-600 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        type="submit"
+                        className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm"
+                      >
+                        {isEditingStudent ? 'Update Changes' : 'Save Student'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
